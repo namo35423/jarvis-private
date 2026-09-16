@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Drive Jarvis from the command line (or from another Claude Code session).
+
+    jarvis "open spotify"          run one instruction, print the reply
+    jarvis say "dinner is ready"   speak something out loud
+    jarvis listen                  start listening, as if you pressed the hotkey
+    jarvis stop                    interrupt whatever it is doing
+    jarvis status                  is it up, what is loaded, what is it doing
+    jarvis grant                   walk through the macOS permission prompts
+    jarvis mute / unmute           turn the wake word off and on
+    jarvis logs                    follow the brain log
+
+Anything that takes a while (a Claude hand-off) returns immediately; Jarvis
+announces the result out loud when it lands.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+CONFIG = os.path.expanduser("~/.jarvis/config.json")
+LOG = os.path.expanduser("~/.jarvis/logs/brain.log")
+
+
+def port() -> int:
+    try:
+        with open(CONFIG) as fh:
+            return int(json.load(fh).get("server", {}).get("port", 8765))
+    except (OSError, ValueError, KeyError):
+        return 8765
+
+
+def call(path: str, payload: dict | None = None, timeout: float = 300.0):
+    url = f"http://127.0.0.1:{port()}{path}"
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, method="POST" if data else "GET",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.URLError as exc:
+        die(f"Jarvis is not running ({exc.reason}). Open Jarvis from ~/Applications.")
+    except TimeoutError:
+        die("Jarvis did not answer in time.")
+
+
+def die(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+
+    cmd, rest = argv[0], argv[1:]
+
+    if cmd == "status":
+        s = call("/api/status")
+        bits = [
+            f"state       {s.get('state')}",
+            f"model       {s.get('model')}",
+            f"microphone  {s.get('mic')}",
+            f"wake word   {'ready' if s.get('wake') else 'off'}",
+            f"listening   {'on' if s.get('listening_enabled') else 'muted'}",
+            f"speech      stt {s.get('stt')}, tts {s.get('tts')}",
+        ]
+        learning = s.get("learning") or {}
+        bits.append(f"learned     {learning.get('lessons', 0)} lessons, "
+                    f"{learning.get('skills', 0)} shortcuts, {learning.get('episodes', 0)} turns")
+        for job in s.get("jobs", []):
+            bits.append(f"claude      {job['title']}: {job['progress']}")
+        print("\n".join(bits))
+        return 0
+
+    if cmd == "grant":
+        print("Asking macOS for permission to control your apps.")
+        print("Click Allow on each prompt as it appears...\n")
+        r = call("/api/grant", {"force": "--all" in rest}, timeout=600)
+        for app, outcome in (r.get("results") or {}).items():
+            print(f"  {app:16} {outcome}")
+        print("\n" + (r.get("summary") or ""))
+        return 0
+
+    if cmd == "listen":
+        call("/api/activate", {})
+        print("listening")
+        return 0
+
+    if cmd == "stop":
+        call("/api/stop", {})
+        print("stopped")
+        return 0
+
+    if cmd in ("mute", "unmute"):
+        r = call("/api/listening", {"enabled": cmd == "unmute"})
+        print("wake word " + ("on" if r.get("listening") else "off"))
+        return 0
+
+    if cmd == "say":
+        text = " ".join(rest).strip()
+        if not text:
+            die('usage: jarvis say "something"')
+        call("/api/say", {"text": text})
+        return 0
+
+    if cmd == "logs":
+        os.execvp("tail", ["tail", "-f", LOG])
+
+    if cmd == "restart":
+        subprocess.run(["pkill", "-f", "brain/.venv/bin/python -m jarvis"], check=False)
+        print("brain restarting (the app brings it straight back)")
+        return 0
+
+    text = " ".join(argv).strip()
+    quiet = "--quiet" in argv or "-q" in argv
+    if quiet:
+        text = " ".join(a for a in argv if a not in ("--quiet", "-q")).strip()
+    result = call("/api/command", {"text": text, "speak": not quiet})
+    reply = (result or {}).get("reply", "")
+    if reply:
+        print(reply)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        raise SystemExit(130)

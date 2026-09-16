@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Jarvis</title>
+<link rel="stylesheet" href="style.css">
+<script>
+  // Opened from the menu bar dropdown: compact layout over native glass.
+  if (/[?&]panel\b/.test(location.search)) document.documentElement.classList.add('panel');
+  window.jarvisShown = function () { var i = document.getElementById('input'); if (i) i.focus(); };
+</script>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <header class="topbar" id="topbar">
+    <div class="bar-group">
+      <span class="clock" id="clock">--:--</span>
+      <span class="sep" aria-hidden="true"></span>
+      <span class="label model" id="model">offline</span>
+    </div>
+    <div class="bar-group right">
+      <span class="conn" id="conn" role="status" aria-label="Connection">
+        <i class="dot" aria-hidden="true"></i><span class="label" id="connText">connecting</span>
+      </span>
+      <button class="btn label" id="newBtn" type="button" title="New conversation">new</button>
+      <button class="btn label" id="micBtn" type="button" aria-pressed="false" title="Mute the microphone">
+        <span id="micText">mic on</span>
+      </button>
+      <button class="btn label" id="settingsBtn" type="button" aria-expanded="false" aria-controls="drawer" title="Settings">settings</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="stage" id="stage">
+      <canvas id="orb" aria-hidden="true"></canvas>
+      <button class="orbHit" id="orbHit" type="button" aria-label="Activate Jarvis"></button>
+      <div class="stageFoot">
+        <div class="statusWord" id="statusWord" role="status" aria-live="polite">ready</div>
+        <div class="statusDetail" id="statusDetail"></div>
+        <div class="timers" id="timers"></div>
+      </div>
+    </section>
+
+    <section class="stream" id="stream" aria-live="polite" aria-atomic="false" aria-label="Conversation"></section>
+  </main>
+
+  <div class="rail" id="rail"></div>
+
+  <footer class="composer">
+    <form id="composerForm" autocomplete="off">
+      <span class="caret" aria-hidden="true">&rsaquo;</span>
+      <input id="input" type="text" placeholder="type a command" aria-label="Type a command" spellcheck="false">
+      <button class="btn label send" id="sendBtn" type="submit">send</button>
+    </form>
+    <div class="hint label" id="hint">space to talk &middot; esc to stop</div>
+  </footer>
+
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Settings">
+    <div class="drawerHead">
+      <span class="label big">settings</span>
+      <button class="btn label" id="drawerClose" type="button" aria-label="Close settings">close</button>
+    </div>
+    <div class="drawerBody">
+
+      <section class="group">
+        <h2 class="label">voice</h2>
+        <div class="row">
+          <label class="label" for="setVoice">voice</label>
+          <div class="ctl">
+            <select id="setVoice" data-path="voice.voice"></select>
+            <button class="btn label" id="previewBtn" type="button">preview</button>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="setSpeed">rate</label>
+          <div class="ctl">
+            <input type="range" id="setSpeed" data-path="voice.speed" min="0.6" max="1.6" step="0.05">
+            <output class="num" id="setSpeedOut"></output>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="label">listening</h2>
+        <div class="row">
+          <label class="label" for="setWake">wake sensitivity</label>
+          <div class="ctl">
+            <input type="range" id="setWake" data-path="listening.wake_threshold" min="0.15" max="0.9" step="0.05">
+            <output class="num" id="setWakeOut"></output>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="setPause">end-of-speech pause</label>
+          <div class="ctl">
+            <input type="range" id="setPause" data-path="listening.end_silence_ms" min="300" max="2500" step="50">
+            <output class="num" id="setPauseOut"></output>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="setFollow">follow-up window</label>
+          <div class="ctl">
+            <input type="range" id="setFollow" data-path="listening.followup_seconds" min="0" max="15" step="0.5">
+            <output class="num" id="setFollowOut"></output>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="label">behaviour</h2>
+        <div class="row">
+          <label class="label" for="setConfirm">confirm risky actions</label>
+          <div class="ctl">
+            <input type="checkbox" id="setConfirm" data-path="safety.confirm_risky" class="switch">
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="setClaude">claude hand-off</label>
+          <div class="ctl">
+            <select id="setClaude" data-path="claude.mode">
+              <option value="auto">auto</option>
+              <option value="explicit">explicit</option>
+              <option value="off">off</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="label">permissions</h2>
+        <div class="perm" id="permAccess"><span class="label">accessibility</span><span class="permVal label">unknown</span></div>
+        <div class="perm" id="permScreen"><span class="label">screen recording</span><span class="permVal label">unknown</span></div>
+        <p class="note">Granted in System Settings &rsaquo; Privacy &amp; Security. Jarvis re-checks on reconnect.</p>
+      </section>
+
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
