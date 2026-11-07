@@ -1,4 +1,4 @@
-# Local warm male Thai voice
+# Local natural Thai voices
 
 Engine: [Wayu-Paxa-TTS-Edge](https://huggingface.co/wayu-ai/wayu-paxa-tts-edge),
 model revision `8196688df56a8d08ccfa186505343adff412ab6b`.
@@ -15,7 +15,7 @@ Jarvis brain. There is no HTTP listener. Python network connections are blocked
 inside the worker and model paths must already exist. English pronunciation
 assets are checked and warmed at startup. Parent exit also terminates the worker.
 
-Settings: `voice.engine=wayu`, `voice.voice=m_mid_warm`, `voice.speed=1.0`,
+Settings: `voice.engine=wayu`, `voice.voice=m_young_clear`, `voice.speed=0.93`,
 and `voice.model_dir` pointing to the downloaded model snapshot. The UI voice and
 speed controls still work. Other male presets: `m_young_clear`, `m_elderly_deep`,
 `m_teen_bright`.
