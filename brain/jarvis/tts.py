@@ -9,6 +9,11 @@ reply is finished.
 from __future__ import annotations
 
 import logging
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+import soundfile as sf
 import queue
 import threading
 import time
@@ -32,6 +37,9 @@ class Speaker:
         self.cfg = cfg
         self.out = audio_out
         self._kokoro = None
+        self.engine = cfg.get("voice.engine", "kokoro")
+        self._native_voices = []
+        self.last_ms = 0.0
         self.ready = False
         self._q: queue.Queue[tuple[str, str | None, float] | None] = queue.Queue()
         self._thread: threading.Thread | None = None
@@ -46,6 +54,19 @@ class Speaker:
     # ------------------------------------------------------------------ load
     def load_sync(self) -> None:
         t0 = time.time()
+        if self.engine == "macos":
+            listing = subprocess.run(["/usr/bin/say", "-v", "?"], capture_output=True,
+                                     text=True, check=True, timeout=10).stdout
+            self._native_voices = [re.split(r"\s+[a-z]{2}_[A-Z]{2}\s+", line)[0].strip()
+                                   for line in listing.splitlines()]
+            for key in ("voice.thai_voice", "voice.english_voice"):
+                voice = self.cfg.get(key)
+                if not self._resolve_voice(voice):
+                    raise RuntimeError(f"Voice {voice!r} is not installed. Download it in System Settings > Accessibility > Read & Speak > System voice > Manage Voices.")
+            self.ready = True
+            self._thread = threading.Thread(target=self._worker, name="jarvis-tts", daemon=True)
+            self._thread.start()
+            return
         from kokoro_onnx import Kokoro
 
         if not KOKORO_MODEL.exists() or not KOKORO_VOICES.exists():
@@ -58,7 +79,15 @@ class Speaker:
         self._thread = threading.Thread(target=self._worker, name="jarvis-tts", daemon=True)
         self._thread.start()
 
+    def _resolve_voice(self, voice: str) -> str | None:
+        if voice in self._native_voices:
+            return voice
+        base = (voice or "").split(" (")[0]
+        return next((v for v in self._native_voices if v.split(" (")[0] == base), None)
+
     def voices(self) -> list[str]:
+        if self.engine == "macos":
+            return self._native_voices
         if not self._kokoro:
             return []
         try:
@@ -72,6 +101,21 @@ class Speaker:
 
     def synth(self, text: str, voice: str | None = None, speed: float | None = None):
         """Blocking synthesis. Returns (float32 samples, sample_rate)."""
+        if self.engine == "macos":
+            t0 = time.monotonic()
+            voice = voice or self.cfg.get("voice.thai_voice" if re.search(r"[฀-๿]", text) else "voice.english_voice")
+            voice = self._resolve_voice(voice) or voice
+            rate = max(80, min(350, int(self.cfg.get("voice.rate", 175) * (speed if speed is not None else self.cfg.get("voice.speed", 1.0)))))
+            with tempfile.TemporaryDirectory(prefix="jarvis-tts-") as tmp:
+                source, target = Path(tmp) / "text.txt", Path(tmp) / "speech.aiff"
+                source.write_text(text, encoding="utf-8")
+                subprocess.run(["/usr/bin/say", "-v", voice, "-r", str(rate), "-f", str(source), "-o", str(target)],
+                               capture_output=True, check=True, timeout=45)
+                samples, sr = sf.read(target, dtype="float32")
+            self.last_ms = (time.monotonic() - t0) * 1000
+            if samples.ndim > 1:
+                samples = samples.mean(axis=1)
+            return samples, sr
         if not self._kokoro:
             raise RuntimeError("speech synthesis is not loaded")
         voice = voice or self.cfg.get("voice.voice", "bm_george")

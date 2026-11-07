@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import time
 import subprocess
 import sys
 import urllib.error
@@ -114,7 +116,19 @@ def main(argv: list[str]) -> int:
         os.execvp("tail", ["tail", "-f", LOG])
 
     if cmd == "restart":
-        subprocess.run(["pkill", "-f", "brain/.venv/bin/python -m jarvis"], check=False)
+        pid = int(call("/api/status")["pid"])
+        command = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=True).stdout
+        if " -m jarvis" not in command:
+            die("Refusing to restart an unrecognised process")
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(50):
+            probe = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
+            if probe != command:
+                break
+            time.sleep(0.1)
+        else:
+            # CoreAudio device teardown can hang, especially after Bluetooth changes.
+            os.kill(pid, signal.SIGKILL)
         print("brain restarting (the app brings it straight back)")
         return 0
 

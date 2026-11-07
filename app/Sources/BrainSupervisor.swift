@@ -152,7 +152,7 @@ final class BrainSupervisor {
         p.standardInput = FileHandle.nullDevice
 
         p.terminationHandler = { [weak self] proc in
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated { self?.handleExit(proc) }
             }
         }

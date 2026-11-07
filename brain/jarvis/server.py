@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 from aiohttp import WSMsgType, web
 
@@ -19,6 +20,19 @@ from jarvis.config import UI_DIR
 from jarvis.core import Assistant
 
 log = logging.getLogger("jarvis.server")
+
+
+@web.middleware
+async def local_only(request, handler):
+    # A remote web page must not be able to drive this unauthenticated local API.
+    hosts = {"127.0.0.1", "localhost", "::1"}
+    if urlparse("http://" + request.host).hostname not in hosts:
+        raise web.HTTPForbidden(text="Local host required")
+    origin = request.headers.get("Origin")
+    if origin and (urlparse(origin).hostname not in hosts or
+                   urlparse(origin).netloc != request.host):
+        raise web.HTTPForbidden(text="Local same-origin requests only")
+    return await handler(request)
 
 
 class UIClient:
@@ -59,7 +73,7 @@ class Server:
     def __init__(self, assistant: Assistant):
         self.assistant = assistant
         self.cfg = assistant.cfg
-        self.app = web.Application()
+        self.app = web.Application(middlewares=[local_only])
         self._runner: web.AppRunner | None = None
         self._setup_routes()
 
@@ -81,6 +95,8 @@ class Server:
     # ------------------------------------------------------------- lifecycle
     async def start(self) -> None:
         host = self.cfg.get("server.host", "127.0.0.1")
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("Jarvis control API must bind to loopback")
         port = int(self.cfg.get("server.port", 8765))
         self._runner = web.AppRunner(self.app, access_log=None)
         await self._runner.setup()
@@ -162,13 +178,13 @@ class Server:
             a.earcons.enabled = bool(value)
         elif path == "listening.enabled":
             a.listener.set_enabled(bool(value))
-        elif path in ("assistant_name", "user_name", "address_as"):
+        elif path in ("assistant_name", "user_name", "address_as", "language"):
             a.rebuild_system_prompt()
 
     async def _preview_voice(self, voice: str) -> None:
         if not voice:
             return
-        sample = "Good evening. Systems are online and everything is running locally."
+        sample = "สวัสดีครับ ระบบพร้อมใช้งาน ทุกอย่างประมวลผลในเครื่องครับ" if "Kanya" in voice else "Good evening. Everything is running locally."
         try:
             samples, sr = await asyncio.get_running_loop().run_in_executor(
                 None, self.assistant.speaker.synth, sample, voice

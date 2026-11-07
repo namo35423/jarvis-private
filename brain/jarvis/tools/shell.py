@@ -41,7 +41,7 @@ def classify_shell(command: str) -> str | None:
 
 
 def _confirm_shell(args: dict) -> str | None:
-    return classify_shell(args.get("command", ""))
+    return classify_shell(args.get("command", "")) or "อนุญาตให้รันคำสั่งนี้ไหมครับ: " + args.get("command", "")
 
 
 APPLESCRIPT_DANGEROUS = re.compile(
@@ -53,7 +53,7 @@ def _confirm_applescript(args: dict) -> str | None:
     script = args.get("script", "")
     if APPLESCRIPT_DANGEROUS.search(script):
         return "That script will delete, send or shut something down. Run it?"
-    return None
+    return "อนุญาตให้รัน AppleScript นี้ไหมครับ: " + script
 
 
 @tool(

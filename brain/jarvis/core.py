@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Any
 
 from jarvis import tools as tools_mod
+from jarvis import thai
 from jarvis.audio import AudioInput, AudioOutput, MicUnavailable
 from jarvis.config import Config, ensure_dirs
 from jarvis.jobs import Job, JobManager
@@ -144,10 +145,10 @@ def normalise_command(text: str) -> str:
         t = _POLITE.sub("", _WAKE.sub("", t)).strip()
     t = _TRAILING.sub("", t).strip(" .")
     t = re.sub(r"^(open|pull|bring) up\b", r"\1", t)
-    return t
+    return thai.normalise(t) if thai.THAI.search(t) else t
 
 
-PERSONAL = re.compile(r"\b(i|im|i'm|my|mine|me|we|our)\b", re.I)
+PERSONAL = re.compile(r"\b(i|im|i'm|my|mine|me|we|our)\b|ฉัน|ผม|ของเรา", re.I)
 _COMMAND = re.compile(r"^(open|close|quit|play|pause|set|remind|text|send|search|find|show|tell|make|create|turn|"
                       r"call|email|add|delete|move|organize|go|look|check|read|take|put|start|stop)\b", re.I)
 
@@ -213,6 +214,7 @@ class Assistant:
         self._last_episode_at = 0.0
         self._current_text = ""
         self._ready = False
+        self._ollama_ready = False
 
     # ------------------------------------------------------------- lifecycle
     async def start(self) -> None:
@@ -220,6 +222,7 @@ class Assistant:
         log.info("starting up")
 
         ok = await self.llm.ensure_up()
+        self._ollama_ready = ok and self.llm.model in await self.llm.list_models()
         if not ok:
             log.warning("Ollama is not reachable - replies will fail until it starts")
 
@@ -240,7 +243,7 @@ class Assistant:
         await self._start_audio()
 
         await self.scheduler.start()
-        asyncio.create_task(self._preflight_permissions())
+        # Ask for app permissions only when an explicitly requested tool needs them.
         # Finish warming before declaring ready. Nobody is talking to Jarvis in
         # the first few seconds after launch, and doing this lazily instead
         # means the first thing they DO say waits out the whole model load.
@@ -383,6 +386,7 @@ class Assistant:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
+        self.stt.close()
         self.listener.stop()
         self.speaker.stop()
         self.speaker.close()
@@ -418,11 +422,21 @@ class Assistant:
             "type": "status",
             "ready": self._ready,
             "pid": os.getpid(),
-            "ollama": True,
+            "ollama": self._ollama_ready,
+            "stt_model": self.stt.model_id,
+            "stt_language": self.cfg.get("stt.language"),
+            "stt_last_ms": self.stt.last_ms,
+            "tts_last_ms": self.speaker.last_ms,
             "model": self.cfg.get("llm.model"),
             "stt": "ready" if self.stt.ready else "off",
             "tts": "ready" if self.speaker.ready else "off",
             "wake": self.listener.wake_ready,
+            "wake_peak_30s": round(self.listener.wake_peak, 4),
+            "wake_count": self.listener.wake_count,
+            "mic_frames": self.audio_in.frames_received,
+            "mic_level": round(self.audio_in.last_level, 4),
+            "input_device": self.audio_in.device,
+            "output_device": self.audio_out.device,
             "mic": self._mic_status,
             "listening_enabled": self.listener.enabled,
             "state": self.state,
@@ -556,6 +570,26 @@ class Assistant:
     async def _fast_path(self, text: str, speak: bool) -> str | None:
         """Handle the handful of commands that should never wait for a model."""
         t = normalise_command(text)
+        if thai.THAI.search(t):
+            if t in {"หยุดพูด", "เงียบ", "ยกเลิก"}:
+                self.interrupt("user asked")
+                return ""
+            reply = thai.clock_reply(t)
+            if reply:
+                return await self._quick_reply(reply, speak)
+            plan = thai.parse(t, self._last_app, self.cfg.get("media.preferred"))
+            if plan and all(name != "calendar" for name, _ in plan):
+                results = []
+                for name, args in plan:
+                    result = await execute(ToolContext(self), name, args)
+                    self._record_fast(name, args, result)
+                    results.append(thai.localise_result(name, args, result))
+                    if result.startswith(("Error:", "Cancelled by the user")):
+                        break
+                    if name in {"open_app", "quit_app"}:
+                        self._last_app = args["name"]
+                return await self._quick_reply(" ".join(results), speak)
+            return None  # Thai compound/ambiguous requests must not hit English shortcuts
 
         if t in {"stop", "cancel", "never mind", "nevermind", "shut up", "be quiet", "quiet", "stop talking", "forget it"}:
             self.interrupt("user asked")
@@ -680,7 +714,7 @@ class Assistant:
         self._maybe_reset_conversation()
         if not self.messages:
             self.rebuild_system_prompt()
-        frontmost = self._frontmost_app()
+        frontmost = await asyncio.to_thread(self._frontmost_app)
         model_text = text
         learn_later = None
         if corrected:
@@ -717,15 +751,6 @@ class Assistant:
                 async for chunk in self.llm.chat_stream(convo, tool_schemas):
                     if chunk.kind == "text":
                         assistant_text += chunk.text
-                        self.broadcast({"type": "reply_delta", "turn": turn_id, "text": chunk.text})
-                        if speak and not clipped and "<tool_call>" not in assistant_text:
-                            for sentence in stream.feed(chunk.text):
-                                if spoken_chars + len(sentence) > max_spoken:
-                                    self.speaker.say("The rest is on screen.")
-                                    clipped = True
-                                    break
-                                self.speaker.say(sentence)
-                                spoken_chars += len(sentence)
                     elif chunk.kind == "tool_calls":
                         calls = chunk.tool_calls
                     elif chunk.kind == "done" and chunk.stats:
@@ -747,6 +772,15 @@ class Assistant:
                     stream._buf = strip_tool_call_text(stream._buf)
                 if not calls:
                     final_text = assistant_text.strip()
+                    self.broadcast({"type": "reply_delta", "turn": turn_id, "text": final_text})
+                    if speak:
+                        for sentence in stream.feed(final_text):
+                            if spoken_chars + len(sentence) <= max_spoken:
+                                self.speaker.say(sentence)
+                                spoken_chars += len(sentence)
+                            else:
+                                clipped = True
+                                break
                     break
 
                 # Fast path: one tool, its result is already an answer, and the
@@ -780,7 +814,7 @@ class Assistant:
 
                 for call in calls:
                     spec = tools_mod.REGISTRY.get(call.name)
-                    if (speak and not assistant_text.strip() and spec and spec.ack
+                    if (speak and self.cfg.get("language") != "th" and not assistant_text.strip() and spec and spec.ack
                             and call.name not in tools_mod.SPEAKABLE_RESULT):
                         with contextlib.suppress(Exception):
                             self.speaker.say(spec.ack.format(**{k: str(v) for k, v in call.arguments.items()}))
@@ -801,7 +835,7 @@ class Assistant:
                 # Silence is the worst possible answer, so fall back to what the
                 # tool actually reported.
                 last_result = getattr(self, "_last_tool_result", "")
-                final_text = last_result.removeprefix("Error: ") if last_result else "Done."
+                final_text = last_result.removeprefix("Error: ") if last_result else ("ยังไม่มีผลลัพธ์ยืนยันครับ" if self.cfg.get("language") == "th" else "No result was confirmed.")
                 if speak:
                     self.speaker.say(for_speech(final_text))
 
@@ -836,9 +870,11 @@ class Assistant:
 
     # A request with a conjunction may need more than one tool, so the
     # single-tool shortcut must not fire on it and drop half the job.
-    _MULTI_INTENT = re.compile(r"\b(and|then|also|after that|as well as|plus)\b", re.I)
+    _MULTI_INTENT = re.compile(r"\b(and|then|also|after that|as well as|plus)\b|แล้ว|และ", re.I)
 
     def _can_finish_on_tool(self, calls, request: str, round_no: int) -> bool:
+        if self.cfg.get("language") == "th":
+            return False  # let the local model render non-localised tool results in Thai
         if round_no != 0 or len(calls) != 1:
             return False
         if calls[0].name not in tools_mod.SPEAKABLE_RESULT:
@@ -869,6 +905,8 @@ class Assistant:
         })
         log.info("tool %s(%s)", call.name, call.arguments)
         result = await execute(ctx, call.name, call.arguments)
+        if self.cfg.get("language") == "th" and not result.startswith(("Error:", "Cancelled by the user")):
+            result = thai.localise_result(call.name, call.arguments, result)
         failed = isinstance(result, str) and result.startswith("Error:")
         episode.plan.append({"name": call.name, "args": call.arguments})
         episode.results.append(str(result)[:300])
@@ -900,7 +938,7 @@ class Assistant:
             spec = tools_mod.REGISTRY.get(step.get("name", ""))
             if spec is None:
                 return await self._run_turn_without_skill(text, turn_id, speak)
-            if speak and spec.ack:
+            if speak and self.cfg.get("language") != "th" and spec.ack:
                 with contextlib.suppress(Exception):
                     self.speaker.say(spec.ack.format(**{k: str(v) for k, v in step.get("args", {}).items()}))
             result = await self._run_tool(ctx, _Call(step["name"], step.get("args", {})), turn_id, episode)
@@ -1203,8 +1241,6 @@ class Assistant:
 
     # ----------------------------------------------------------- confirmation
     async def request_confirmation(self, prompt: str, detail: str = "") -> bool:
-        if not self.cfg.get("safety.confirm_risky", True):
-            return True
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[bool] = loop.create_future()
         confirm_id = uuid.uuid4().hex[:6]

@@ -85,7 +85,7 @@ class Listener(threading.Thread):
         self.on_event = on_event
         self.is_speaking = is_speaking
 
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._mode = self.WAKE
         self._lock = threading.Lock()
         self._pending_capture: dict | None = None
@@ -94,6 +94,9 @@ class Listener(threading.Thread):
         self.oww = None
         self.vad: SileroVAD | None = None
         self.wake_ready = False
+        self.wake_peak = 0.0
+        self.wake_peak_since = time.monotonic()
+        self.wake_count = 0
 
         preroll_frames = max(1, int(cfg.get("listening.preroll_ms", 400) / 80))
         self._preroll: deque[np.ndarray] = deque(maxlen=preroll_frames)
@@ -134,7 +137,7 @@ class Listener(threading.Thread):
             self.vad = None
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     # ---------------------------------------------------------------- inputs
     def set_enabled(self, enabled: bool) -> None:
@@ -171,7 +174,7 @@ class Listener(threading.Thread):
 
     # ------------------------------------------------------------------ loop
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 frame = self.audio.frames.get(timeout=0.3)
             except queue.Empty:
@@ -224,7 +227,13 @@ class Listener(threading.Thread):
         for name, score in scores.items():
             if score > best:
                 best_name, best = name, float(score)
+        if time.monotonic() - self.wake_peak_since > 30:
+            self.wake_peak = 0.0
+            self.wake_peak_since = time.monotonic()
+        self.wake_peak = max(self.wake_peak, best)
         if best >= threshold:
+            self.wake_count += 1
+            log.info("wake detected score=%.3f threshold=%.3f", best, threshold)
             self.oww.reset()
             self.on_event("wake", {"model": best_name, "score": best, "interrupting": speaking})
             self._begin_capture(followup=False)
@@ -298,6 +307,7 @@ class Listener(threading.Thread):
 
     def _finish_capture(self, reason: str) -> None:
         frames = self._buf
+        silence_ms = self._silence_ms
         self._reset_capture()
         self._mode = self.WAKE if self._enabled else self.SLEEP
         if self.oww:
@@ -308,7 +318,7 @@ class Listener(threading.Thread):
         audio = np.concatenate(frames).astype(np.float32) / 32768.0
         # Trim the trailing pause so the recogniser is not fed a second of silence.
         keep_tail = int(0.25 * SAMPLE_RATE)
-        trim = int((self._silence_ms / 1000.0) * SAMPLE_RATE) - keep_tail
+        trim = int((silence_ms / 1000.0) * SAMPLE_RATE) - keep_tail
         if trim > 0 and len(audio) - trim > SAMPLE_RATE * 0.2:
             audio = audio[:-trim]
         self.on_event(

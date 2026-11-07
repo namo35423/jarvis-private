@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import time
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
@@ -58,7 +59,10 @@ class OllamaClient:
 
     @property
     def url(self) -> str:
-        return self.cfg.get("llm.ollama_url", "http://127.0.0.1:11434").rstrip("/")
+        url = self.cfg.get("llm.ollama_url", "http://127.0.0.1:11434").rstrip("/")
+        if urlparse(url).hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise LLMError("This local installation requires Ollama on loopback")
+        return url
 
     @property
     def model(self) -> str:
@@ -116,13 +120,16 @@ class OllamaClient:
     async def warm(self, model: str | None = None) -> None:
         """Load weights into memory without generating anything."""
         model = model or self.model
+        if model in self._warmed and str(self.cfg.get("llm.keep_alive", "")).startswith("-"):
+            return
         try:
             c = await self.client()
-            await c.post(
+            response = await c.post(
                 f"{self.url}/api/chat",
-                json={"model": model, "messages": [], "keep_alive": self.cfg.get("llm.keep_alive", "2h")},
+                json={"model": model, "messages": [], "keep_alive": self.cfg.get("llm.keep_alive", "2h"), "options": self._options()},
                 timeout=120.0,
             )
+            response.raise_for_status()
             self._warmed.add(model)
         except httpx.HTTPError as exc:
             log.debug("warm-up failed for %s: %s", model, exc)

@@ -62,7 +62,7 @@ SPEAKABLE_RESULT = {
 }
 
 
-CONFIRM_ONLY = {"messages_send", "file_action", "run_shell"}
+CONFIRM_ONLY = {"messages_send", "file_action", "run_shell", "run_applescript", "system_control", "reminders"}
 
 
 @dataclass
@@ -94,7 +94,7 @@ class ToolSpec:
     def confirmation_for(self, args: dict) -> str | None:
         # Only things that cannot be taken back ask first: sending a message,
         # trashing a file, a destructive shell command. Everything else just runs.
-        if self.risk is None or self.name not in CONFIRM_ONLY:
+        if self.risk is None:
             return None
         if self.name == "file_action" and (args.get("action") or "").lower() != "trash":
             return None
@@ -272,7 +272,7 @@ async def execute(ctx: ToolContext, name: str, args: dict) -> str:
     if missing:
         return f"Error: missing required argument(s): {', '.join(missing)}"
 
-    if ctx.cfg.get("safety.confirm_risky", True):
+    if ctx.cfg.get("safety.confirm_risky", True) or name in CONFIRM_ONLY:
         prompt = spec.confirmation_for(args)
         if prompt:
             approved = await ctx.confirm(prompt)

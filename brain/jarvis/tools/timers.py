@@ -59,6 +59,21 @@ def _words_to_digits(text: str) -> str:
 def parse_duration(text: str) -> float:
     """Natural-language duration -> seconds. Raises ToolError if unparseable."""
     s = (text or "").lower().replace("-", " ")
+    s = s.translate(str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789"))
+    digits = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"]
+    numbers = {word: str(n) for n, word in enumerate(digits)}
+    for n in range(10, 100):
+        tens, ones = divmod(n, 10)
+        word = ("" if tens == 1 else "ยี่" if tens == 2 else digits[tens]) + "สิบ"
+        word += "เอ็ด" if ones == 1 else digits[ones] if ones else ""
+        numbers[word] = str(n)
+    numbers.update({"หนึ่งร้อย": "100", "ร้อย": "100"})
+    for word in sorted(numbers, key=len, reverse=True):
+        s = s.replace(word, numbers[word])
+    s = s.replace("ครึ่งชั่วโมง", "half hour").replace("ครึ่งนาที", "half minute")
+    for th, en in (("ชั่วโมง", "hours"), ("วินาที", "seconds"), ("นาที", "minutes")):
+        s = s.replace(th, " " + en + " ")
+    s = s.replace("ครึ่ง", " and a half ")
     s = re.sub(r"[^a-z0-9.\s]", " ", s)
 
     # Fraction idioms run on the spoken words, before any number-word or article
@@ -174,7 +189,14 @@ async def set_timer(ctx: ToolContext, duration: str, label: str = "") -> str:
     label = " ".join((label or "").split()).strip(".,!?").lower()
     spoken = human_duration(seconds)
     message = f"Your {label} timer is up." if label else f"Your {spoken} timer is up."
+    thai_spoken = spoken
+    for word, translated in (("hours", "ชั่วโมง"), ("hour", "ชั่วโมง"), ("minutes", "นาที"), ("minute", "นาที"), ("seconds", "วินาที"), ("second", "วินาที")):
+        thai_spoken = thai_spoken.replace(word, translated)
+    if ctx.cfg.get("language") == "th":
+        message = f"ครบเวลา {label or thai_spoken} แล้วครับ"
     ctx.scheduler.add("timer", time.time() + seconds, message, label)
+    if ctx.cfg.get("language") == "th":
+        return f"ตั้งเวลา {label + ' ' if label else ''}{thai_spoken} แล้วครับ"
     return f"{label.capitalize()} timer set for {spoken}." if label else f"Timer set for {spoken}."
 
 

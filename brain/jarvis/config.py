@@ -28,6 +28,8 @@ UI_DIR = PROJECT_DIR / "ui"
 
 DEFAULTS: dict[str, Any] = {
     "assistant_name": "Jarvis",
+    "language": "th",
+    "media": {"preferred": "youtube_music"},
     "user_name": "",  # set by setup.sh, or say "call me ..."
     # Spoken honorific. "" = never use one. Set to "sir" for the full film treatment.
     "address_as": "",
@@ -37,7 +39,7 @@ DEFAULTS: dict[str, Any] = {
         "fast_model": "",  # empty = reuse the main model, so only one is resident
         "vision_model": "qwen3.5:4b",
         "ollama_url": "http://127.0.0.1:11434",
-        "num_ctx": 12288,
+        "num_ctx": 8192,
         "temperature": 0.7,
         "top_p": 0.8,
         # Keep the model resident so replies stay instant; it costs RAM, not power.
@@ -51,15 +53,25 @@ DEFAULTS: dict[str, Any] = {
         "conversation_timeout_min": 120,
     },
     "voice": {
-        "engine": "kokoro",
+        "engine": "macos",
+        "thai_voice": "Kanya (ไทย (ไทย))",
+        "english_voice": "Samantha",
+        "rate": 175,
         "voice": "bm_george",
-        "speed": 1.3,
+        "speed": 1.0,
         "volume": 0.9,
         "sample_rate": 24000,
     },
     "stt": {
-        "engine": "parakeet",
-        "model": "mlx-community/parakeet-tdt-0.6b-v3",
+        "engine": "whisper",
+        "model": "mlx-community/whisper-large-v3-turbo",
+        "language": "auto",
+        "allowed_languages": ["th", "en"],
+        "bias_language": "th",
+        "initial_prompt": "",
+        "min_rms": 0.002,
+        "cache_mib": 256,
+        "english_model": "mlx-community/parakeet-tdt-0.6b-v3",
         "fallback_engine": "whisper",
         "fallback_model": "mlx-community/whisper-large-v3-turbo",
     },
@@ -69,9 +81,9 @@ DEFAULTS: dict[str, Any] = {
         "wake_threshold": 0.5,
         "vad_threshold": 0.5,
         # How long a pause means "they finished talking".
-        "end_silence_ms": 550,
+        "end_silence_ms": 650,
         # How long to keep listening after Jarvis finishes speaking.
-        "followup_seconds": 5.0,
+        "followup_seconds": 7.0,
         "no_speech_timeout_s": 6.0,
         "min_speech_ms": 250,
         "max_utterance_s": 30.0,
@@ -83,7 +95,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "claude": {
         # auto = hand off when the task needs it; explicit = only when asked; off = never
-        "mode": "auto",
+        "mode": "off",
         "binary": "",
         "permission_mode": "acceptEdits",
         "model": "",

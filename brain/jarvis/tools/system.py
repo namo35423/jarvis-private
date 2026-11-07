@@ -177,7 +177,10 @@ async def _set_volume(level: int) -> int:
     if level > 0:
         script += "\nset volume without output muted"
     await osascript(script, timeout=10)
-    return level
+    actual, muted = await _volume()
+    if abs(actual - level) > 1 or (level > 0 and muted):
+        raise ToolError(f"Volume did not change to {level}; device reports {actual}.")
+    return actual
 
 
 # -------------------------------------------------------------- brightness
@@ -364,7 +367,7 @@ _POWER_PROMPTS = {
 
 
 def _system_risk(args: dict) -> str | None:
-    return _POWER_PROMPTS.get(str(args.get("action", "")).strip().lower())
+    return _POWER_PROMPTS.get(str(args.get("action", "")).strip().lower()) or ("เปลี่ยนการเชื่อมต่อ Wi-Fi ไหมครับ" if args.get("action") in {"wifi_on", "wifi_off"} else None)
 
 
 @tool(

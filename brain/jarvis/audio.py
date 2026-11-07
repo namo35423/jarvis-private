@@ -54,6 +54,8 @@ class AudioInput:
         self._stream = None
         self._sd = None
         self.dropped = 0
+        self.frames_received = 0
+        self.last_level = 0.0
         self.started_at = 0.0
 
     def start(self) -> None:
@@ -83,6 +85,8 @@ class AudioInput:
             return "default"
 
     def _callback(self, indata, frames, time_info, status) -> None:  # audio thread
+        self.frames_received += 1
+        self.last_level = rms_level(indata[:, 0])
         if status:
             log.debug("input status: %s", status)
         try:

@@ -66,19 +66,19 @@ CREATE INDEX IF NOT EXISTS idx_episodes_norm ON episodes(norm);
 
 CORRECTION_PATTERNS = re.compile(
     r"^\s*(no[,.\s]|nope|wrong|that's wrong|that is wrong|not (that|what)|i (said|meant|asked)|"
-    r"actually[,\s]|i didn't (say|ask)|don't do that|stop doing|that's not)",
+    r"ไม่ใช่|ผิดแล้ว|หมายถึง|จริงๆ|actually[,\s]|i didn't (say|ask)|don't do that|stop doing|that's not)",
     re.I,
 )
 # "It didn't work", "it's still open" - reports that the last action failed.
 FAILURE_REPORTS = re.compile(
     r"\b(did ?n'?t|did not|does ?n'?t|does not|is ?n'?t|not) (work|close|open|quit|stop|play|change|happen|do anything)\b|"
-    r"\bstill (open|there|running|playing|on|here|going)\b|\bthat'?s (wrong|not right|not what)\b|"
+    r"ยังไม่ปิด|ยังไม่เปิด|ไม่ทำงาน|ไม่ได้ผล|ลองใหม่|\bstill (open|there|running|playing|on|here|going)\b|\bthat'?s (wrong|not right|not what)\b|"
     r"\btry (it )?again\b|\byou (did ?n'?t|did not|missed|forgot|got it wrong)\b|\bwrong\b",
     re.I,
 )
 PREFERENCE_PATTERNS = re.compile(
     r"\b(always|never|from now on|in future|in the future|stop (saying|doing)|"
-    r"i prefer|i'd prefer|i like it when|don't ever|remember to)\b",
+    r"ต่อไปนี้|ฉันชอบ|อย่าพูด|จำไว้ว่า|i prefer|i'd prefer|i like it when|don't ever|remember to)\b",
     re.I,
 )
 
@@ -119,7 +119,7 @@ def normalise(text: str) -> str:
     """Canonical form for matching repeat requests."""
     t = (text or "").lower().strip()
     t = re.sub(r"^(hey |ok |okay |jarvis[,\s]+|please\s+)+", "", t)
-    t = re.sub(r"[^a-z0-9\s]", "", t)
+    t = re.sub(r"[^a-z0-9\s\u0e00-\u0e7f]", "", t)
     return re.sub(r"\s+", " ", t).strip()
 
 

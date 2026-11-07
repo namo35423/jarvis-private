@@ -35,7 +35,7 @@ if ! command -v ollama >/dev/null 2>&1 && [ ! -d /Applications/Ollama.app ]; the
 fi
 OLLAMA="$(command -v ollama || echo /Applications/Ollama.app/Contents/Resources/ollama)"
 if ! curl -s --max-time 2 http://127.0.0.1:11434/api/version >/dev/null; then
-    open -ga Ollama || true
+    if [ -d /Applications/Ollama.app ]; then open -ga Ollama; else brew services start ollama; fi
     for _ in $(seq 1 30); do curl -s --max-time 2 http://127.0.0.1:11434/api/version >/dev/null && break; sleep 1; done
 fi
 curl -s --max-time 2 http://127.0.0.1:11434/api/version >/dev/null || fail "Ollama is installed but not running. Open the Ollama app, then run ./setup.sh again."
@@ -43,8 +43,8 @@ curl -s --max-time 2 http://127.0.0.1:11434/api/version >/dev/null || fail "Olla
 
 bold "Python environment"
 if ! command -v uv >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/uv" ]; then
-    echo "Installing uv (Python package manager, from astral.sh)"
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    command -v brew >/dev/null || fail "Install Homebrew or uv, then run setup again."
+    brew install uv
 fi
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 [ -x "$BRAIN/.venv/bin/python" ] || "$UV" venv --python 3.12 "$BRAIN/.venv"

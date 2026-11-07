@@ -36,7 +36,7 @@ def _confirm_click(args: dict) -> str | None:
     if (args.get("action") or "") not in ("click", "submit"):
         return None
     target = args.get("target") or ""
-    if RISKY_WORDS.search(target):
+    if RISKY_WORDS.search(target) or re.search("ซื้อ|จ่าย|โอน|ชำระ|ส่ง|ลบ|ยืนยัน|จอง|เผยแพร่", target) or (args.get("action") == "submit") :
         return f"Click '{target.strip()}' in the browser?"
     return None
 

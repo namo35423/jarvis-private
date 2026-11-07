@@ -1,44 +1,36 @@
 #!/usr/bin/env bash
-# Downloads every local model Jarvis needs. Safe to re-run: each step is skipped
-# if the file is already there, and partial downloads resume.
-set -uo pipefail
-
-BRAIN="$(cd "$(dirname "$0")/../brain" && pwd)"
-PY="$BRAIN/.venv/bin/python"
-MODELS="$HOME/.jarvis/models"
-KOKORO_REL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
-
-mkdir -p "$MODELS"
-
-echo "==> Wake word (openWakeWord: hey_jarvis + melspectrogram + embeddings + silero VAD)"
+# Fetch trusted model artifacts before running Jarvis offline.
+# --english-fallback also installs the original Parakeet and Kokoro models.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PY="$ROOT/brain/.venv/bin/python"
+export PYTHONPATH="$ROOT/brain"
+export HF_HUB_DISABLE_TELEMETRY=1
+export JARVIS_FETCH_ENGLISH="${1:-}"
+unset HF_HUB_OFFLINE
 "$PY" - <<'PY'
-import openwakeword.utils as u
-try:
-    u.download_models(["hey_jarvis"])
-    print("wake word models ready")
-except Exception as e:
-    print("WAKE_WORD_FAILED:", type(e).__name__, e)
+import os
+from huggingface_hub import snapshot_download
+from jarvis.config import Config
+import openwakeword.utils
+openwakeword.utils.download_models(['hey_jarvis'])
+cfg=Config()
+models=[cfg.get('stt.model')]
+if os.environ.get('JARVIS_FETCH_ENGLISH')=='--english-fallback':
+ models.append('mlx-community/parakeet-tdt-0.6b-v3')
+for model in dict.fromkeys(models):
+ print('Fetching',model,flush=True)
+ snapshot_download(model)
 PY
-
-echo "==> Kokoro TTS voice model"
-for f in kokoro-v1.0.onnx voices-v1.0.bin; do
-    if [ -s "$MODELS/$f" ]; then
-        echo "    $f already present ($(du -h "$MODELS/$f" | cut -f1))"
-    else
-        echo "    fetching $f"
-        curl -fL --retry 3 --retry-delay 2 -C - -o "$MODELS/$f" "$KOKORO_REL/$f" || echo "KOKORO_FAILED: $f"
-    fi
-done
-
-echo "==> Speech recognition (Parakeet, from Hugging Face)"
-"$PY" - <<'PY'
-try:
-    from parakeet_mlx import from_pretrained
-    from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
-    print("parakeet ready")
-except Exception as e:
-    print("PARAKEET_FAILED:", type(e).__name__, e)
-PY
-
-echo "==> Done"
-ls -la "$MODELS" 2>/dev/null
+ENGINE="$("$PY" -c 'from jarvis.config import Config; print(Config().get("voice.engine"))')"
+if [ "$ENGINE" = "kokoro" ] || [ "${1:-}" = "--english-fallback" ]; then
+    MODELS="$HOME/.jarvis/models"
+    mkdir -p "$MODELS"
+    for name in kokoro-v1.0.onnx voices-v1.0.bin; do
+        if [ ! -s "$MODELS/$name" ]; then
+            curl -fL --retry 5 --retry-all-errors -C - -o "$MODELS/$name.partial" \
+                "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$name"
+            mv "$MODELS/$name.partial" "$MODELS/$name"
+        fi
+    done
+fi

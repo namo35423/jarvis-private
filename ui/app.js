@@ -168,6 +168,7 @@ function handle(msg) {
   switch (msg.type) {
     case "hello":
       state.config = msg.config || {};
+      state.voices = msg.voices || [];
       state.status = msg.status || {};
       applyConfig();
       applyStatus();
@@ -211,6 +212,7 @@ function handle(msg) {
       break;
     case "config":
       state.config = msg.config || {};
+      state.voices = msg.voices || [];
       applyConfig();
       break;
     case "timers":
@@ -613,8 +615,9 @@ function cfgGet(path, fallback) {
 const controls = Array.from(document.querySelectorAll("[data-path]"));
 
 function applyConfig() {
-  const voices = cfgGet("voice.voices", null);
-  const current = cfgGet("voice.voice", "");
+  const voices = state.voices || cfgGet("voice.voices", null);
+  el.setVoice.dataset.path = cfgGet("voice.engine", "macos") === "macos" ? "voice.thai_voice" : "voice.voice";
+  const current = cfgGet(el.setVoice.dataset.path, "");
   const list = Array.isArray(voices) && voices.length ? voices.slice() : FALLBACK_VOICES.slice();
   if (current && !list.includes(current)) list.unshift(current);
   if (el.setVoice.dataset.filled !== list.join(",")) {

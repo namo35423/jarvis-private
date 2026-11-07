@@ -71,6 +71,8 @@ async def _loop_watchdog(limit: float = 30.0) -> None:
 
 
 async def main() -> int:
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     setup_logging()
     log = logging.getLogger("jarvis")
 

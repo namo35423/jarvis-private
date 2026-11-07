@@ -63,6 +63,7 @@ def speak_time(when: datetime) -> str:
         "when": {"type": "string", "description": "When it is due in plain words, e.g. 'tomorrow at 9am', 'in 2 hours'"},
     },
     required=["action"],
+    risk=lambda a: "สร้างรายการเตือนความจำนี้ไหมครับ: " + a.get("text", "") + " " + a.get("when", "") if a.get("action") == "create" else None,
     category="productivity",
 )
 async def reminders(ctx: ToolContext, action: str, text: str = "", when: str = "") -> str:
@@ -72,6 +73,8 @@ async def reminders(ctx: ToolContext, action: str, text: str = "", when: str = "
         if not text.strip():
             raise ToolError("say what to be reminded about")
         due = parse_when(when) if when else None
+        if when and due is None:
+            raise ToolError("อ่านวันเวลาไม่ได้ครับ กรุณาระบุวันและเวลาให้ชัดเจน")
         props = f"name:{applescript_quote(text.strip())}"
         script = 'tell application "Reminders"\n'
         if due:
