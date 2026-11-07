@@ -71,6 +71,14 @@ const FALLBACK_VOICES = [
   "bm_george", "bm_fable", "bm_daniel", "bm_lewis",
 ];
 
+const VOICE_LABELS = {
+  m_jarvis_smooth: "ผู้ชายวัยหนุ่ม · ทุ้มเล็กน้อย (B)",
+  m_young_clear: "ผู้ชายวัยหนุ่ม · เสียงโปร่ง (A)",
+  m_teen_bright: "ผู้ชาย · สดใส (C)",
+  m_mid_warm: "ผู้ชาย · ทุ้มอุ่น",
+  m_elderly_deep: "ผู้ชายสูงวัย · เสียงทุ้ม",
+};
+
 const state = {
   connected: false,
   brainState: "idle",
@@ -625,7 +633,7 @@ function applyConfig() {
     for (const v of list) {
       const opt = document.createElement("option");
       opt.value = v;
-      opt.textContent = v;
+      opt.textContent = VOICE_LABELS[v] || v;
       el.setVoice.appendChild(opt);
     }
     el.setVoice.dataset.filled = list.join(",");

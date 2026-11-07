@@ -37,6 +37,7 @@ class Speaker:
         self.cfg = cfg
         self.out = audio_out
         self._kokoro = None
+        self._neural = None
         self.engine = cfg.get("voice.engine", "kokoro")
         self._native_voices = []
         self.last_ms = 0.0
@@ -54,7 +55,7 @@ class Speaker:
     # ------------------------------------------------------------------ load
     def load_sync(self) -> None:
         t0 = time.time()
-        if self.engine == "macos":
+        if self.engine in ("macos", "wayu"):
             listing = subprocess.run(["/usr/bin/say", "-v", "?"], capture_output=True,
                                      text=True, check=True, timeout=10).stdout
             self._native_voices = [re.split(r"\s+[a-z]{2}_[A-Z]{2}\s+", line)[0].strip()
@@ -63,6 +64,16 @@ class Speaker:
                 voice = self.cfg.get(key)
                 if not self._resolve_voice(voice):
                     raise RuntimeError(f"Voice {voice!r} is not installed. Download it in System Settings > Accessibility > Read & Speak > System voice > Manage Voices.")
+            if self.engine == "wayu":
+                from jarvis.neural_voice import NeuralVoice
+                self._neural = NeuralVoice(self.cfg)
+                try:
+                    self._neural.load()
+                except Exception:
+                    log.exception("Local neural voice unavailable; using installed macOS voices")
+                    self._neural.close()
+                    self._neural = None
+                    self.engine = "macos"
             self.ready = True
             self._thread = threading.Thread(target=self._worker, name="jarvis-tts", daemon=True)
             self._thread.start()
@@ -86,6 +97,8 @@ class Speaker:
         return next((v for v in self._native_voices if v.split(" (")[0] == base), None)
 
     def voices(self) -> list[str]:
+        if self.engine == "wayu":
+            return ["m_jarvis_smooth", "m_young_clear", "m_mid_warm", "m_teen_bright", "m_elderly_deep"]
         if self.engine == "macos":
             return self._native_voices
         if not self._kokoro:
@@ -101,7 +114,24 @@ class Speaker:
 
     def synth(self, text: str, voice: str | None = None, speed: float | None = None):
         """Blocking synthesis. Returns (float32 samples, sample_rate)."""
-        if self.engine == "macos":
+        if self.engine == "wayu" and self._neural is not None:
+            t0 = time.monotonic()
+            try:
+                samples, sr = self._neural.synth(
+                    text, voice or self.cfg.get("voice.voice", "m_mid_warm"),
+                    speed if speed is not None else self.cfg.get("voice.speed", 1.0),
+                )
+                self.last_ms = (time.monotonic() - t0) * 1000
+                return samples, sr
+            except Exception:
+                log.exception("Neural synthesis failed; speaking this reply with macOS")
+                self._neural.close()
+                self._neural = None
+                # A failed worker is disabled until the next restart, avoiding
+                # repeated long timeouts. Preserve the reply using native speech.
+                self.engine = "macos"
+                voice = None
+        if self.engine in ("macos", "wayu"):
             t0 = time.monotonic()
             voice = voice or self.cfg.get("voice.thai_voice" if re.search(r"[฀-๿]", text) else "voice.english_voice")
             voice = self._resolve_voice(voice) or voice
@@ -198,6 +228,8 @@ class Speaker:
     def close(self) -> None:
         self._stop.set()
         self._q.put(None)
+        if self._neural is not None:
+            self._neural.close()
 
 
 def _resample(x: np.ndarray, src: int, dst: int) -> np.ndarray:

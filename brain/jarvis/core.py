@@ -427,6 +427,7 @@ class Assistant:
             "stt_language": self.cfg.get("stt.language"),
             "stt_last_ms": self.stt.last_ms,
             "tts_last_ms": self.speaker.last_ms,
+            "tts_engine": self.speaker.engine,
             "model": self.cfg.get("llm.model"),
             "stt": "ready" if self.stt.ready else "off",
             "tts": "ready" if self.speaker.ready else "off",
