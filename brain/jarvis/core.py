@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Any
 
 from jarvis import tools as tools_mod
-from jarvis import thai
+from jarvis import thai, thai_time
 from jarvis.audio import AudioInput, AudioOutput, MicUnavailable
 from jarvis.config import Config, ensure_dirs
 from jarvis.jobs import Job, JobManager
@@ -123,6 +123,43 @@ _TRAILING = re.compile(r"\s+(?:for me|please|now|right now|real quick|thanks|tha
 _ACTION = re.compile(r"^(close|quit|kill|exit|open|launch|play|pause|skip|next|mute|unmute|turn|set|lock|search|go to)\b")
 
 
+# A reply that says something was done. Without a tool call in the turn it is false.
+_CLAIMS_ACTION = re.compile(
+    r"กำลังเล่น|(?:เล่น|เปิด|ปิด|ส่ง|ตั้ง|ปรับ|สร้าง|บันทึก|จด|ลง|เพิ่ม|ลบ|ล็อก|ล็อค|ยกเลิก|ค้นหา|แคป)"
+    r"(?:ให้)?.{0,60}?(?:แล้ว|เรียบร้อย|สำเร็จ)|"
+    r"\b(?:now playing|is (?:now )?playing|started playing|message (?:was )?sent|sent (?:it|the message|your message)|"
+    r"(?:i'?ve|i have) (?:opened|closed|set|created|saved|added|sent|turned)|(?:is|are) now (?:open|closed|on|off))\b",
+    re.I)
+
+
+def _ungrounded_numbers(reply: str, source: str) -> list[str]:
+    """Figures of three or more digits in `reply` that appear nowhere in `source` (years excepted)."""
+    have = {n.replace(",", "").lstrip("0") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", source)}
+    missing = []
+    for raw in re.findall(r"\d[\d,]*(?:\.\d+)?", reply):
+        n = raw.replace(",", "").rstrip(".")
+        digits = n.split(".")[0]
+        if len(digits) < 3 or (len(digits) == 4 and (1900 <= int(digits) <= 2100 or 2400 <= int(digits) <= 2700)):
+            continue
+        if n.lstrip("0") not in have:
+            missing.append(raw)
+    return missing
+
+
+# A clarifying question ("ให้ตั้งเวลากี่นาทีครับ?") is not a claim.
+_ASKS = re.compile(r"(?:ไหม|มั้ย|หรือ(?:ยัง|เปล่า|ไม่)|อะไร|ยังไง|เท่าไหร่|กี่\S*|\?)\s*(?:ครับ|คะ|ค่ะ)?\s*[?.!]?\s*$")
+
+
+async def _no_chunks():
+    return
+    yield  # an empty async generator for forced rounds
+
+# "play shape of you by ed sheeran" -> YouTube Music, when that is the preferred player.
+_PLAY_SONG = re.compile(r"^play (?:the song |song )?(?P<title>(?!.*\b(?:and|then)\b).+?)(?: by (?P<artist>.+))?(?: on youtube music)?$")
+_NOT_A_TITLE = re.compile(r"^(?:(?:the|my|some|a) )?(?:music|it|that|this|something|song|playlist|liked songs|"
+                          r"(?:next|previous|last) (?:song|track)|next|previous|youtube music)$")
+
+
 def normalise_command(text: str) -> str:
     """Reduce what speech recognition hands over to the bare command.
 
@@ -215,6 +252,9 @@ class Assistant:
         self._current_text = ""
         self._ready = False
         self._ollama_ready = False
+        # The server answers before the tools load; commands wait on this instead of
+        # failing with "no tool named ..." (set once tools, speech and timers are up).
+        self._started = asyncio.Event()
 
     # ------------------------------------------------------------- lifecycle
     async def start(self) -> None:
@@ -243,6 +283,7 @@ class Assistant:
         await self._start_audio()
 
         await self.scheduler.start()
+        self._started.set()
         # Ask for app permissions only when an explicitly requested tool needs them.
         # Finish warming before declaring ready. Nobody is talking to Jarvis in
         # the first few seconds after launch, and doing this lazily instead
@@ -537,6 +578,13 @@ class Assistant:
         text = (text or "").strip()
         if not text:
             return ""
+        if not self._started.is_set():
+            log.info("command arrived during startup; waiting for tools: %r", text[:60])
+            try:
+                await asyncio.wait_for(self._started.wait(), timeout=90)
+            except asyncio.TimeoutError:
+                return ("ยังเริ่มระบบไม่เสร็จครับ ลองใหม่อีกสักครู่นะครับ" if self.cfg.get("language") == "th"
+                        else "Still starting up. Try again in a moment.")
 
         if self._pending_confirm is not None:
             verdict = classify_confirmation(text)
@@ -553,16 +601,18 @@ class Assistant:
         self.broadcast({"type": "transcript", "role": "user", "text": text, "turn": turn_id})
         self.memory.log_turn("user", text)
 
+        self._forced_plan = None
         handled = await self._fast_path(text, speak)
         if handled is not None:
             return handled
+        forced, self._forced_plan = self._forced_plan, None
 
         if self._turn_task and not self._turn_task.done():
             self._turn_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._turn_task
 
-        self._turn_task = asyncio.create_task(self._run_turn(text, turn_id, speak))
+        self._turn_task = asyncio.create_task(self._run_turn(text, turn_id, speak, forced))
         try:
             return await self._turn_task
         except asyncio.CancelledError:
@@ -571,15 +621,32 @@ class Assistant:
     async def _fast_path(self, text: str, speak: bool) -> str | None:
         """Handle the handful of commands that should never wait for a model."""
         t = normalise_command(text)
+        line = thai.parse_line(text)  # before lowercasing: the message goes out as spoken
+        if line:
+            args = {"recipient": line[0], "text": line[1]}
+            result = await execute(ToolContext(self), "line_send", args)
+            self._record_fast("line_send", args, result)
+            return await self._quick_reply(thai.localise_result("line_send", args, result), speak)
+        song = _PLAY_SONG.match(t) if self.cfg.get("media.preferred") == "youtube_music" else None
+        if song and not _NOT_A_TITLE.match(song["title"]):
+            args = {"action": "play", "query": song["title"], **({"artist": song["artist"]} if song["artist"] else {})}
+            result = await execute(ToolContext(self), "youtube_music", args)
+            self._record_fast("youtube_music", args, result)
+            return await self._quick_reply(thai.localise_result("youtube_music", args, result), speak)
         if thai.THAI.search(t):
             if t in {"หยุดพูด", "เงียบ", "ยกเลิก"}:
                 self.interrupt("user asked")
                 return ""
-            reply = thai.clock_reply(t)
+            reply = thai.clock_reply(t) or thai.instant_reply(t)
             if reply:
                 return await self._quick_reply(reply, speak)
             plan = thai.parse(t, self._last_app, self.cfg.get("media.preferred"))
-            if plan and all(name != "calendar" for name, _ in plan):
+            if plan and thai.needs_wording(plan):
+                # Data questions (weather, calendar, files): run the tool for certain, then let
+                # the model word the real result in Thai instead of answering from memory.
+                self._forced_plan = plan
+                return None
+            if plan:
                 results = []
                 for name, args in plan:
                     result = await execute(ToolContext(self), name, args)
@@ -690,7 +757,7 @@ class Assistant:
         return text
 
     # ------------------------------------------------------------------ turn
-    async def _run_turn(self, text: str, turn_id: str, speak: bool) -> str:
+    async def _run_turn(self, text: str, turn_id: str, speak: bool, forced: list | None = None) -> str:
         started = time.time()
         self._failed_calls.clear()
         self._blocked_tools.clear()
@@ -702,12 +769,13 @@ class Assistant:
         # itself is distilled after the reply so it never slows the answer down.
         corrected = None
         try:
-            corrected = self.learning.detect_correction(text) or self._rephrase_of_last(text)
+            if not forced:
+                corrected = self.learning.detect_correction(text) or self._rephrase_of_last(text)
             await self.learning.note_preference(text)
         except Exception:
             log.exception("learning pass failed")
 
-        plan = None if corrected else self.learning.find_skill(text)
+        plan = None if (corrected or forced) else self.learning.find_skill(text)
         if plan:
             log.info("skill cache hit for %r", text)
             return await self._replay_skill(plan, text, turn_id, speak, episode)
@@ -716,7 +784,8 @@ class Assistant:
         if not self.messages:
             self.rebuild_system_prompt()
         frontmost = await asyncio.to_thread(self._frontmost_app)
-        model_text = text
+        # Thai six-hour clock ("สองทุ่ม") is spelled out as 20:00: small models misread it.
+        model_text = thai_time.explicit_times(text, alarm="ปลุก" in text) if thai.THAI.search(text) else text
         learn_later = None
         if corrected:
             # Don't just apologise - go back and actually fix it.
@@ -731,8 +800,15 @@ class Assistant:
                 "Confirm it worked with a tool, then say in one sentence what you did."
             )
             learn_later = (corrected, text)
+        if forced and any(name in {"chrome_read_page", "screen_look"} for name, _ in forced):
+            model_text += ("\n[สรุปเนื้อหาจากผลของเครื่องมือเป็นภาษาไทยสั้นๆ สองถึงสามประโยคสำหรับอ่านออกเสียง "
+                           "ไม่ใช้รายการหรือสัญลักษณ์ ใช้เฉพาะสิ่งที่อยู่ในผล]")
+        elif forced:
+            model_text += ("\n[ตอบจากผลของเครื่องมือเท่านั้น เป็นภาษาไทยสั้นๆ หนึ่งถึงสองประโยคสำหรับอ่านออกเสียง "
+                           "ไม่ใช้รายการหรือสัญลักษณ์ ถ้าในผลไม่มีข้อมูลที่ถาม ให้บอกตรงๆ ว่าไม่พบ]")
         user_msg = {"role": "user", "content": with_context(self.cfg, model_text, frontmost, self._fresh_knowledge())}
         convo = self._conversation() + [user_msg]
+        turn_start = len(convo)
 
         stream = SentenceStream()
         spoken_chars = 0
@@ -743,6 +819,8 @@ class Assistant:
         tool_schemas = schemas()
         model = self.llm.model
         ctx = ToolContext(self)
+        tools_before = len(episode.plan)
+        nudges: list[dict] = []
 
         try:
             for round_no in range(rounds):
@@ -750,7 +828,13 @@ class Assistant:
                 calls = []
                 error = ""
 
-                async for chunk in self.llm.chat_stream(convo, tool_schemas, model=model):
+                if forced and round_no == 0:
+                    calls = [_Call(name, args) for name, args in forced]
+                    log.info("forced tools for %r: %s", text, [c.name for c in calls])
+                    stream_source = None
+                else:
+                    stream_source = self.llm.chat_stream(convo, tool_schemas, model=model)
+                async for chunk in (stream_source or _no_chunks()):
                     if chunk.kind == "text":
                         assistant_text += chunk.text
                     elif chunk.kind == "tool_calls":
@@ -774,6 +858,19 @@ class Assistant:
                     stream._buf = strip_tool_call_text(stream._buf)
                 if not calls:
                     final_text = assistant_text.strip()
+                    if (len(episode.plan) == tools_before and _CLAIMS_ACTION.search(final_text)
+                            and not _ASKS.search(final_text)):
+                        # "กำลังเล่น X ครับ" with no tool call: the small model copied an
+                        # earlier reply. Nothing happened, so it must not be said.
+                        if not nudges and round_no + 1 < rounds:
+                            log.info("model claimed an action without calling a tool; asking again")
+                            nudges += [{"role": "assistant", "content": final_text},
+                                       {"role": "user", "content": "[SYSTEM] You did not call any tool, so nothing "
+                                        "happened. Call the right tool now, or say plainly that you cannot."}]
+                            convo += nudges
+                            continue
+                        final_text = ("ผมยังไม่ได้ทำคำสั่งนี้จริงครับ ลองสั่งอีกครั้งโดยบอกชื่อเพลงหรือชื่อคนให้ชัดเจน"
+                                      if self.cfg.get("language") == "th" else "I didn't actually do that. Please ask again.")
                     self.broadcast({"type": "reply_delta", "turn": turn_id, "text": final_text})
                     if speak:
                         for sentence in stream.feed(final_text):
@@ -826,6 +923,19 @@ class Assistant:
             else:
                 final_text = "That needed more steps than I'm allowed. Ask me again, more specifically."
 
+            web_results = [m.get("content", "") for m in convo[turn_start:]
+                           if m.get("role") == "tool" and m.get("tool_name") in {"web_search", "fetch_url"}]
+            if web_results and final_text and _ungrounded_numbers(final_text, " ".join(web_results) + " " + text):
+                # A small model reading search snippets invents prices ("29,500 บาท") when the
+                # snippets carry none. Only numbers that are in the results may be said.
+                log.info("reply had numbers not in the search results: %r", final_text[:160])
+                source = re.search(r" - ([a-z0-9.-]+\.[a-z]{2,})(?: - |$)", " ".join(web_results), re.M)
+                final_text = ("ผลค้นหาไม่มีตัวเลขที่ชัดเจนครับ" + (f" ข้อมูลล่าสุดดูได้ที่ {source[1]}" if source else "")
+                              if self.cfg.get("language") == "th" else
+                              "The search results don't give a clear figure." + (f" Check {source[1]}." if source else ""))
+                stream = SentenceStream()
+                if speak:
+                    self.speaker.say(final_text)
             if speak and not clipped:
                 rest = stream.flush()
                 if rest and spoken_chars + len(rest) <= max_spoken:
@@ -844,6 +954,7 @@ class Assistant:
             self.broadcast({"type": "reply_done", "turn": turn_id, "text": final_text})
             if final_text:
                 self.memory.log_turn("assistant", final_text)
+            convo = [m for m in convo if not any(m is n for n in nudges)]
             self.messages = convo + ([{"role": "assistant", "content": final_text}] if final_text else [])
             self._last_turn_at = time.time()
 
@@ -910,6 +1021,7 @@ class Assistant:
         if self.cfg.get("language") == "th" and not result.startswith(("Error:", "Cancelled by the user")):
             result = thai.localise_result(call.name, call.arguments, result)
         failed = isinstance(result, str) and result.startswith("Error:")
+        log.info("tool %s returned %d chars%s", call.name, len(str(result)), " (error)" if failed else "")
         episode.plan.append({"name": call.name, "args": call.arguments})
         episode.results.append(str(result)[:300])
         if call.name in ("open_app", "quit_app") and (call.arguments or {}).get("name"):

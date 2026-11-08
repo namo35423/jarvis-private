@@ -109,7 +109,7 @@ DEFAULTS: dict[str, Any] = {
         "city": "",
         "lat": None,
         "lon": None,
-        "units": "imperial",
+        "units": "",  # "" = Celsius for Thai, Fahrenheit for English; set "metric"/"imperial" to force
         "timezone": "",
     },
     "ui": {"mini_orb": True, "show_transcript": True},

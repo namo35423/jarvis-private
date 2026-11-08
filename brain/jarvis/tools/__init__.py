@@ -58,11 +58,11 @@ SPEAKABLE_RESULT = {
     "get_weather", "open_app", "quit_app", "system_control", "media_control",
     "set_timer", "timers", "remember", "recall", "notify", "notes",
     "reminders", "calendar", "daily_briefing", "claude_jobs", "ask_claude",
-    "organize_files", "chrome_tabs", "open_url", "messages_send", "file_action",
+    "organize_files", "chrome_tabs", "open_url", "messages_send", "file_action", "line_send", "youtube_music",
 }
 
 
-CONFIRM_ONLY = {"messages_send", "file_action", "run_shell", "run_applescript", "system_control", "reminders"}
+CONFIRM_ONLY = {"messages_send", "line_send", "file_action", "run_shell", "run_applescript", "system_control", "reminders"}
 
 
 @dataclass

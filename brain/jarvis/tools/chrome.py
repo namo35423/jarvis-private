@@ -178,6 +178,10 @@ async def chrome_tabs(ctx: ToolContext, action: str, index: int = 0, match: str 
         await _tell(f"tell active tab of front window to {verb}")
         return f"Done ({action})."
 
+    if action == "close" and not index and not match:  # "close this tab"
+        await _tell("close active tab of front window")
+        return "Closed the current tab."
+
     chosen = None
     if index and 1 <= int(index) <= len(tabs):
         chosen = tabs[int(index) - 1]

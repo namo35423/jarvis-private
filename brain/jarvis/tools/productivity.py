@@ -265,8 +265,8 @@ def _confirm_message(args: dict) -> str:
 @tool(
     name="messages_send",
     description=(
-        "Send an iMessage or text through the Messages app. Use only when the user explicitly asks to "
-        "text or message someone. The user is always asked to confirm before it sends."
+        "Send an iMessage/SMS through Apple's Messages app only. Never for LINE (use line_send), Messenger or "
+        "WhatsApp. The user is always asked to confirm before it sends."
     ),
     params={
         "recipient": {"type": "string", "description": "Contact name, phone number or email"},

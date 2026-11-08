@@ -270,7 +270,7 @@ class Learning:
         """Remember a plan that worked, so an identical request can skip the model."""
         if not ep.plan or len(ep.plan) > 2 or not ep.norm:
             return
-        if any(c.get("name") in UNCACHEABLE for c in ep.plan):
+        if any(c.get("name") in UNCACHEABLE for c in ep.plan) or not plan_fits_request(ep.request, ep.plan):
             return
         plan_json = json.dumps(ep.plan)
         with self.memory._lock:
@@ -309,7 +309,9 @@ class Learning:
             plan = json.loads(row["plan"])
         except json.JSONDecodeError:
             return None
-        return plan or None
+        if not plan or not plan_fits_request(request, plan):
+            return None
+        return plan
 
     def used_skill(self, request: str) -> None:
         with self.memory._lock:
@@ -348,7 +350,26 @@ class Learning:
 
 
 # Plans whose arguments are inherently one-off, so caching them would be wrong.
-UNCACHEABLE = {"ask_claude", "run_shell", "run_applescript", "file_action", "messages_send", "computer_input"}
+UNCACHEABLE = {"ask_claude", "run_shell", "run_applescript", "file_action", "messages_send", "line_send", "computer_input"}
+
+
+# Arguments that name something the user must have said: a song, an app, a person.
+_SPOKEN_ARGS = {"query", "artist", "name", "recipient", "text", "url", "title", "target", "app"}
+
+
+def plan_fits_request(request: str, plan: list[dict]) -> bool:
+    """A cached plan may only replay when every name/title in it was actually said.
+
+    Stops vague follow-ups ("เปิดดิ", "it still didn't open") from being bound to
+    whatever the previous turn happened to call.
+    """
+    said = normalise(request).replace(" ", "")
+    for call in plan:
+        for key, value in (call.get("args") or {}).items():
+            if key in _SPOKEN_ARGS and isinstance(value, str) and value.strip():
+                if normalise(value).replace(" ", "") not in said:
+                    return False
+    return True
 
 
 def _describe_plan(plan: list[dict]) -> str:

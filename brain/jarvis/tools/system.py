@@ -290,6 +290,24 @@ def _hhmm(text: str) -> str:
     return " ".join(parts)
 
 
+def _disk_space() -> str:
+    """Free space as Finder counts it (purgeable space included), falling back to statfs."""
+    import shutil
+
+    total = shutil.disk_usage("/").total
+    free = None
+    try:
+        from Foundation import NSURL
+
+        url = NSURL.fileURLWithPath_("/")
+        values, _ = url.resourceValuesForKeys_error_(["NSURLVolumeAvailableCapacityForImportantUsageKey"], None)
+        free = values and values.get("NSURLVolumeAvailableCapacityForImportantUsageKey")
+    except Exception:  # noqa: BLE001 - pyobjc missing or the key unsupported
+        free = None
+    free = int(free) if free else shutil.disk_usage("/").free
+    return f"Disk {free / 1e9:.0f} GB free of {total / 1e9:.0f} GB."
+
+
 async def _battery() -> str:
     proc = await run(["/usr/bin/pmset", "-g", "batt"], timeout=10)
     text = proc.check("pmset")
@@ -331,6 +349,11 @@ async def _wifi_status() -> str:
     line = (net.stdout or "").strip()
     if ":" in line and "not associated" not in line.lower():
         return f"Wi-Fi is on, connected to {line.split(':', 1)[1].strip()}."
+    # macOS 14+ hides the network name from apps without Location access and then
+    # reports "not associated" even while connected; an address on the interface is the truth.
+    addr = await run(["/usr/sbin/ipconfig", "getifaddr", dev], timeout=10)
+    if addr.ok and (addr.stdout or "").strip():
+        return "Wi-Fi is on and connected."
     return "Wi-Fi is on but not connected to a network."
 
 
@@ -349,6 +372,7 @@ _ACTIONS = [
     "lock_screen",
     "sleep_display",
     "battery",
+    "disk_space",
     "wifi_on",
     "wifi_off",
     "wifi_status",
@@ -374,7 +398,7 @@ def _system_risk(args: dict) -> str | None:
     name="system_control",
     description=(
         "Control the Mac itself: volume, screen brightness, dark or light appearance, "
-        "Wi-Fi, battery level, locking the screen, sleep, restart, shutdown, log out. "
+        "Wi-Fi, battery level, free disk space, locking the screen, sleep, restart, shutdown, log out. "
         "Use this for anything about the computer's own state rather than an app or a file."
     ),
     params={
@@ -451,6 +475,9 @@ async def system_control(ctx, action: str, value: int | None = None) -> str:
 
     if action == "battery":
         return await _battery()
+
+    if action == "disk_space":
+        return await asyncio.to_thread(_disk_space)
 
     if action in ("wifi_on", "wifi_off"):
         dev = await _wifi_device()

@@ -643,6 +643,7 @@ function applyConfig() {
     const val = cfgGet(c.dataset.path, null);
     if (val === null || val === undefined) continue;
     if (c.type === "checkbox") c.checked = Boolean(val);
+    else if (c.type === "radio") c.checked = c.value.toLowerCase() === String(val).toLowerCase();
     else c.value = String(val);
     paintNum(c);
   }

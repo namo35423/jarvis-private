@@ -127,11 +127,14 @@ async def osascript(script: str, *, language: str = "AppleScript", timeout: floa
     try:
         proc = await run(cmd, timeout=timeout, stdin=script)
     except ToolError as exc:
-        # A timeout here almost always means a TCC prompt is waiting that this
-        # process cannot show. Say so, rather than reporting a vague timeout.
+        # A timeout is either a permission prompt still waiting or the app being
+        # busy. Say both, but do not remember it as a refusal: one slow reply must
+        # not block every later command until restart. Only -1743 is a real "no".
         if app:
-            _automation_denied.add(app)
-            raise ToolError(automation_help(app)) from exc
+            raise ToolError(
+                f"{app} did not respond in time. If macOS is asking whether Jarvis may control {app}, "
+                f"allow it; otherwise try again."
+            ) from exc
         raise
     if not proc.ok:
         err = proc.stderr.strip()

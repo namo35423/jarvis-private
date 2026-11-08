@@ -366,7 +366,8 @@ async def _geocode(client: httpx.AsyncClient, name: str) -> dict:
     data = await _get_json(
         client,
         "https://geocoding-api.open-meteo.com/v1/search",
-        {"name": name, "count": 1, "language": "en", "format": "json"},
+        # Thai place names only resolve when searched in Thai ("เชียงใหม่").
+        {"name": name, "count": 1, "language": "th" if re.search(r"[\u0e00-\u0e7f]", name) else "en", "format": "json"},
     )
     hits = data.get("results") or []
     if not hits:
@@ -409,9 +410,31 @@ async def _locate(ctx: ToolContext, client: httpx.AsyncClient) -> dict:
     return place
 
 
+# The settings switch ("อยู่ที่ ฮ่องกง / กรุงเทพฯ") writes one of these keys to location.city.
+PLACES = {
+    "hong kong": {"th": "ฮ่องกง", "en": "Hong Kong", "lat": 22.302, "lon": 114.174, "timezone": "Asia/Hong_Kong"},
+    "bangkok": {"th": "กรุงเทพฯ", "en": "Bangkok", "lat": 13.7563, "lon": 100.5018, "timezone": "Asia/Bangkok"},
+}
+
+
+_PLACE_ALIASES = {"ฮ่องกง": "hong kong", "กรุงเทพ": "bangkok", "กรุงเทพฯ": "bangkok", "กรุงเทพมหานคร": "bangkok"}
+
+
+def preset_place(city: str, language: str = "th") -> dict | None:
+    key = (city or "").strip().lower()
+    p = PLACES.get(_PLACE_ALIASES.get(key, key))
+    if not p:
+        return None
+    return {"city": p["th"] if language == "th" else p["en"], "lat": p["lat"], "lon": p["lon"],
+            "timezone": p["timezone"]}
+
+
 async def _resolve_place(ctx: ToolContext, client: httpx.AsyncClient, location: str | None) -> dict:
     if location and location.strip():
-        return await _geocode(client, location.strip())
+        return preset_place(location, ctx.cfg.get("language")) or await _geocode(client, location.strip())
+    preset = preset_place(ctx.cfg.get("location.city") or "", ctx.cfg.get("language"))
+    if preset:
+        return preset  # the switch wins over coordinates cached from an earlier lookup
     lat, lon = ctx.cfg.get("location.lat"), ctx.cfg.get("location.lon")
     if lat is not None and lon is not None:
         return {
@@ -438,8 +461,8 @@ def _clock(iso: str) -> str:
     return f"{hour} {'AM' if dt.hour < 12 else 'PM'}"
 
 
-def _rain_outlook(data: dict, now_iso: str) -> str:
-    """The one hourly detail worth saying out loud: when it starts raining."""
+def _rain_peak(data: dict, now_iso: str) -> tuple[Any, str] | None:
+    """(weather code, hour) of the likeliest rain in the next 12 hours, if it is likely."""
     hourly = data.get("hourly") or {}
     times = hourly.get("time") or []
     probs = hourly.get("precipitation_probability") or []
@@ -447,19 +470,130 @@ def _rain_outlook(data: dict, now_iso: str) -> str:
     try:
         start = next(i for i, t in enumerate(times) if t >= now_iso)
     except StopIteration:
-        return ""
+        return None
     best_i, best_p = -1, 0
     for i in range(start, min(start + 12, len(probs))):
         p = probs[i] or 0
         if p > best_p:
             best_i, best_p = i, p
     if best_i < 0 or best_p < 45:
+        return None
+    return (codes[best_i] if best_i < len(codes) else None), times[best_i]
+
+
+def _rain_outlook(data: dict, now_iso: str) -> str:
+    """The one hourly detail worth saying out loud: when it starts raining."""
+    peak = _rain_peak(data, now_iso)
+    if not peak:
         return ""
-    what = _sky(codes[best_i]) if best_i < len(codes) else "rain"
+    what = _sky(peak[0]) if peak[0] is not None else "rain"
     if "snow" not in what and "rain" not in what and "drizzle" not in what and "thunder" not in what:
         what = "rain"
-    when = _clock(times[best_i])
+    when = _clock(peak[1])
     return f"{what.capitalize()} likely around {when}" if when else ""
+
+
+# Thai wording, said directly: a 4B model rewording English forecasts mixed up places
+# ("no weather for Thailand" for a Hong Kong forecast) and units.
+WMO_TH = {0: "ท้องฟ้าแจ่มใส", 1: "ฟ้าโปร่ง", 2: "มีเมฆบางส่วน", 3: "เมฆครึ้ม", 45: "มีหมอก", 48: "มีหมอก",
+          51: "ฝนปรอยๆ", 53: "ฝนปรอยๆ", 55: "ฝนปรอย", 56: "ฝนปรอย", 57: "ฝนปรอย",
+          61: "ฝนตกเล็กน้อย", 63: "ฝนตก", 65: "ฝนตกหนัก", 66: "ฝนตก", 67: "ฝนตกหนัก",
+          71: "หิมะตกเล็กน้อย", 73: "หิมะตก", 75: "หิมะตกหนัก", 77: "หิมะตก",
+          80: "ฝนตกเป็นช่วงๆ", 81: "ฝนตกเป็นช่วงๆ", 82: "ฝนตกหนักเป็นช่วงๆ", 85: "หิมะตก", 86: "หิมะตกหนัก",
+          95: "พายุฝนฟ้าคะนอง", 96: "พายุฝนฟ้าคะนอง", 99: "พายุฝนฟ้าคะนอง"}
+_DAY_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์", "อาทิตย์"]
+
+
+def _sky_th(code: Any) -> str:
+    try:
+        return WMO_TH.get(int(code), "อากาศแปรปรวน")
+    except (TypeError, ValueError):
+        return "อากาศแปรปรวน"
+
+
+def _clock_th(iso: str) -> str:
+    """Thai six-hour clock, the way people say it: ตี 3, 8 โมงเช้า, บ่าย 2 โมง, 5 โมงเย็น, 2 ทุ่ม."""
+    try:
+        h = datetime.fromisoformat(iso).hour
+    except ValueError:
+        return ""
+    if h == 0:
+        return "เที่ยงคืน"
+    if h <= 5:
+        return f"ตี {h}"
+    if h <= 11:
+        return f"{h} โมงเช้า"
+    if h == 12:
+        return "เที่ยง"
+    if h == 13:
+        return "บ่ายโมง"
+    if h <= 15:
+        return f"บ่าย {h - 12} โมง"
+    if h <= 18:
+        return f"{h - 12} โมงเย็น"
+    return f"{h - 18} ทุ่ม"
+
+
+def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
+    city = city.split(",")[0].strip()  # "เชียงใหม่, จังหวัดเชียงใหม่" reads badly aloud
+    daily = data["daily"]
+    days = daily["time"]
+    speed = "ไมล์ต่อชั่วโมง" if imperial else "กิโลเมตรต่อชั่วโมง"
+    windy_at = 20 if imperial else 32
+
+    def day_line(i: int, lead: str) -> str:
+        hi, lo = round(daily["temperature_2m_max"][i]), round(daily["temperature_2m_min"][i])
+        code = (daily.get("weather_code") or [None] * len(days))[i]
+        out = f"{lead}ที่{city} {_sky_th(code)} สูงสุด {hi} ต่ำสุด {lo} องศา"
+        pop = (daily.get("precipitation_probability_max") or [None] * len(days))[i]
+        if pop and pop >= 30:
+            out += f" โอกาสฝนตก {int(pop)} เปอร์เซ็นต์"
+        elif int(code or 0) not in WET:  # never "drizzle ... no rain expected"
+            out += " ไม่น่าจะมีฝน"
+        wind = (daily.get("wind_speed_10m_max") or [0] * len(days))[i] or 0
+        if wind >= windy_at:
+            out += f" ลมแรงถึง {round(wind)} {speed}"
+        return out + "ครับ"
+
+    if when == "today":
+        return day_line(0, "วันนี้")
+    if when == "tomorrow":
+        if len(days) < 2:
+            raise ToolError("no forecast available for tomorrow")
+        return day_line(1, "พรุ่งนี้")
+    if when == "now":
+        cur = data.get("current") or {}
+        temp = round(cur.get("temperature_2m", 0))
+        feels = round(cur.get("apparent_temperature", temp))
+        code = int(cur.get("weather_code") or 0)
+        out = f"ตอนนี้ที่{city} {temp} องศา {_sky_th(code)}"
+        if abs(feels - temp) >= 4:
+            out += f" รู้สึกเหมือน {feels} องศา"
+        out += f" วันนี้สูงสุด {round(daily['temperature_2m_max'][0])} ต่ำสุด {round(daily['temperature_2m_min'][0])} องศา"
+        peak = _rain_peak(data, cur.get("time", ""))
+        if code not in WET:
+            if peak:
+                what = _sky_th(peak[0]) if peak[0] is not None and int(peak[0]) in WET else "ฝนตก"
+                at = _clock_th(peak[1])
+                out += f" อาจมี{what} ราว{' ' if at[:1].isdigit() else ''}{at}"
+            else:
+                out += " ไม่น่าจะมีฝน"
+        wind = cur.get("wind_speed_10m") or 0
+        if wind >= windy_at:
+            out += f" ลมแรง {round(wind)} {speed}"
+        return out + "ครับ"
+    highs = [round(t) for t in daily["temperature_2m_max"]]
+    lows = [round(t) for t in daily["temperature_2m_min"]]
+    wet = [_DAY_TH[datetime.fromisoformat(days[i]).weekday()]
+           for i, c in enumerate(daily.get("weather_code") or []) if int(c or 0) in WET]
+    out = f"สัปดาห์นี้ที่{city} สูงสุด {min(highs)} ถึง {max(highs)} ต่ำสุด {min(lows)} ถึง {max(lows)} องศา"
+    if not wet:
+        out += " ไม่มีฝนทั้งสัปดาห์"
+    elif len(wet) <= 3:
+        out += " มีฝนวัน" + (wet[0] if len(wet) == 1 else " ".join(wet[:-1]) + " และ" + wet[-1])
+    else:
+        out += f" ฝนตกเกือบทุกวัน เริ่มวัน{wet[0]}"
+    return out + "ครับ"
 
 
 @tool(
@@ -487,7 +621,9 @@ async def get_weather(ctx: ToolContext, location: str = "", when: str = "now") -
     when = (when or "now").strip().lower()
     if when not in ("now", "today", "tomorrow", "week"):
         when = "now"
-    imperial = (ctx.cfg.get("location.units") or "imperial").lower().startswith("i")
+    units = (ctx.cfg.get("location.units") or "").lower()
+    # Thai users think in Celsius; only an explicit "imperial" (or an English setup) means Fahrenheit.
+    imperial = units.startswith("i") if units else ctx.cfg.get("language") != "th"
     speed_word = "miles an hour" if imperial else "kilometres an hour"
 
     async with httpx.AsyncClient(headers={"User-Agent": UA}, timeout=15.0, follow_redirects=True) as client:
@@ -514,6 +650,8 @@ async def get_weather(ctx: ToolContext, location: str = "", when: str = "now") -
     if not days:
         raise ToolError("the weather service returned no forecast for that place")
     city = place["city"]
+    if ctx.cfg.get("language") == "th":
+        return _weather_th(data, when, city, imperial)
 
     def day_line(i: int, lead: str) -> str:
         sky = _sky((daily.get("weather_code") or [None])[i])
@@ -573,3 +711,41 @@ async def get_weather(ctx: ToolContext, location: str = "", when: str = "now") -
     else:
         line += " Dry all week."
     return line
+
+
+@tool(
+    name="news_headlines",
+    description="Latest news headlines, optionally about a topic. Use for 'what's in the news', 'ข่าววันนี้', 'ข่าวเกี่ยวกับ X'.",
+    params={"topic": {"type": "string", "description": "Optional subject, e.g. 'ฟุตบอล' or 'NVIDIA'"}},
+    category="web",
+)
+async def news_headlines(ctx: ToolContext, topic: str = "") -> str:
+    from urllib.parse import quote
+
+    thai = (ctx.cfg.get("language") if ctx else "th") == "th"
+    locale = "hl=th&gl=TH&ceid=TH:th" if thai else "hl=en-US&gl=US&ceid=US:en"
+    topic = (topic or "").strip()
+    url = (f"https://news.google.com/rss/search?q={quote(topic)}&{locale}" if topic
+           else f"https://news.google.com/rss?{locale}")
+    try:
+        async with httpx.AsyncClient(headers={"User-Agent": UA}, timeout=12.0, follow_redirects=True) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            root = lxml.etree.fromstring(r.content)
+    except (httpx.HTTPError, lxml.etree.XMLSyntaxError) as exc:
+        raise ToolError("ดึงข่าวไม่ได้ครับ ตรวจการเชื่อมต่ออินเทอร์เน็ต" if thai else "Could not fetch the news.") from exc
+    titles = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        title = re.sub(r"\s+-\s+[^-]{2,40}$", "", title)  # drop " - Source"
+        title = re.sub(r"\s+\|\s+[^|]{2,40}$", "", title)  # and " | Source"
+        if title and title not in titles:
+            titles.append(title)
+        if len(titles) == 3:
+            break
+    if not titles:
+        return (f"ไม่พบข่าวเกี่ยวกับ {topic} ครับ" if topic else "ไม่พบข่าวล่าสุดครับ") if thai else "No headlines found."
+    if thai:
+        head = f"ข่าวล่าสุดเรื่อง {topic}" if topic else "ข่าวล่าสุด"
+        return head + " " + " ".join(f"{n}. {t}" for n, t in zip(("หนึ่ง", "สอง", "สาม"), titles)) + " ครับ"
+    return "Top headlines: " + "; ".join(titles) + "."
