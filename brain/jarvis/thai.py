@@ -46,12 +46,16 @@ NOT_A_SONG = {"ต่อ", "ต่อเลย", "หน่อย", "ที่�
 NOW_PLAYING = re.compile(r"(?:ตอนนี้)?(?:เพลง(?:ที่)?(?:กำลัง)?(?:เล่น|เปิด)อยู่|เพลงนี้)(?:ชื่อ)?(?:เพลง)?(?:อะไร|ไร)"
                          r"|(?:ตอนนี้)?(?:กำลัง)?(?:เล่น|เปิด|ฟัง)เพลงอะไร(?:อยู่)?|เพลงอะไร(?:อยู่)?|นี่เพลงอะไร")
 # "ส่งข้อความหา Somchai ทางไลน์ว่า สวัสดี", "ส่งไลน์หา Somchai ว่า สวัสดี", "ไลน์หา Somchai ว่า ..."
-LINE_APP = r"(?:line|ไลน์|ไลน)"
+# "ลาย" is how recognition often spells ไลน์; "L I N E" is the name spelled out.
+LINE_APP = r"(?:line|ไลน์|ไลน|l\s*i\s*n\s*e|ลาย(?:น์)?(?!เซ็น|มือ|เส้น|ทาง|ไทย))"
 LINE_MSG = re.compile(
-    r"(?:ส่ง\s*(?:ข้อความ|แชท|แชต)?\s*(?:" + LINE_APP + r")?|" + LINE_APP + r")\s*"
-    r"(?:ไป\s*)?(?:ถึง|หา|ให้|ไปหา|ไปถึง|ไปให้)\s*(?:คุณ\s*)?(?P<who>.+?)\s*"
+    # "ส่ง Line L I N E ไปให้คนชื่อว่า X ส่งคำว่า …", "ส่งไลน์หา X ว่า …", "ไลน์ไปที่ X บอกว่า …"
+    r"(?:ส่ง\s*(?:ข้อความ|แชท|แชต)?\s*(?:(?:แอป\s*)?" + LINE_APP + r"\s*)*|(?:" + LINE_APP + r"\s*)+)"
+    r"(?:ไป\s*)?(?:ถึง|หา|ให้|ที่)\s*"
+    r"(?:คุณ\s*)?(?:คน\s*)?(?:ที่\s*)?(?:ชื่อ\s*)*(?:ว่า\s*)?"
+    r"(?P<who>.+?)\s*"
     r"(?:(?:ผ่าน|ทาง|ใน|ด้วย)\s*(?:แอป\s*)?" + LINE_APP + r"\s*)?"
-    r"(?:ว่า|บอกว่า|ข้อความว่า)\s*(?P<text>.+)", re.I | re.S)
+    r"(?:(?:ส่ง\s*)?(?:คำ|ข้อความ|ประโยค)?\s*ว่า|บอก(?:เขา|เค้า|ไป)?\s*ว่า|พิมพ์\s*ว่า)\s*(?P<text>.+)", re.I | re.S)
 CURRENCY = {"ดอลลาร์สิงคโปร์": "SGD", "ดอลลาร์ฮ่องกง": "HKD", "ดอลลาร์ออสเตรเลีย": "AUD", "ดอลลาร์ไต้หวัน": "TWD",
             "ดอลลาร์สหรัฐ": "USD", "ดอลลาร์": "USD", "ดอลล่าร์": "USD", "เหรียญสหรัฐ": "USD", "ยูเอสดี": "USD",
             "usd": "USD", "ยูโร": "EUR", "eur": "EUR", "เยน": "JPY", "jpy": "JPY", "หยวน": "CNY", "cny": "CNY",
@@ -60,6 +64,20 @@ CURRENCY = {"ดอลลาร์สิงคโปร์": "SGD", "ดอล�
 _CUR = "(" + "|".join(sorted(map(re.escape, CURRENCY), key=len, reverse=True)) + ")"
 WEATHER = re.compile(r"อากาศ|ฝน(?:จะ)?ตก|ฝนตก|ร้อนไหม|ร้อนมั้ย|ร้อนป่าว|หนาวไหม|หนาวมั้ย|อุณหภูมิ|กี่องศา|พยากรณ์|"
                      r"ฟ้าครึ้ม|แดดออก|มีพายุ|ร่มไหม|ต้องพกร่ม|เอาร่มไป")
+# How speech recognition tends to spell the weather words ("อุณภูมิ", "กี่อุงสา").
+_WEATHER_SPELLING = [
+    (re.compile(r"อุ[ณน]?ห?ะ?ภูมิ"), "อุณหภูมิ"),
+    (re.compile(r"(กี่|\d)\s*อุ?[่้]?ง\s*[สศ]า"), r"\1องศา"),
+]
+# Words around a place name that are not part of it.
+_NOT_PLACE = re.compile(
+    r"อุณหภูมิ|อากาศ|พยากรณ์|กี่องศา|องศา|ร้อนไหม|ร้อนมั้ย|ร้อนป่าว|หนาวไหม|หนาวมั้ย|ร้อน|หนาว|"
+    r"ฝนจะตก|ฝนตก|ฝน|ฟ้าครึ้ม|แดดออก|มีพายุ|ร่มไหม|ต้องพกร่ม|เอาร่มไป|"
+    r"ตอนนี้|วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|สัปดาห์นี้|อาทิตย์นี้|ทั้งอาทิตย์|ทั้งสัปดาห์|เสาร์อาทิตย์|วันหยุด|หลายวัน|"
+    r"ทั้งวัน|เย็นนี้|คืนนี้|บ่ายนี้|เช้านี้|ข้างนอก|ที่นี่|แถวนี้|ตรงนี้|"
+    r"เป็นยังไง|เป็นไง|ยังไง|บ้าง|ไหม|มั้ย|ป่าว|เท่าไหร่|เท่าไร|กี่|"
+    r"ประเทศ|จังหวัด|เมือง|แถว|ที่|ของ|จะ|เป็น|"
+    r"กูถามว่า|ถามว่า|บอกว่า|ช่วย|เช็ค|เช็ก|หน่อย|เนี่ย|อ่ะ|วะ|ว่ะ|เว้ย|แล้ว|ล่ะ|หรอ|เหรอ|ครับ|ค่ะ|คะ")
 
 # Plans whose tool output is data to be worded by the model (in Thai), not spoken raw.
 WORDED = {"find_files", "daily_briefing", "web_search", "chrome_read_page", "screen_look_describe"}
@@ -140,7 +158,41 @@ def _clean_task(text: str) -> str:
     return " ".join(t.split()).strip(" ,")
 
 
+def fix_weather_words(t: str) -> str:
+    for pattern, repl in _WEATHER_SPELLING:
+        t = pattern.sub(repl, t)
+    return t
+
+
+def weather_place(t: str) -> str | None:
+    """The place a weather question is about, as Jarvis should say it, or None for "here".
+
+    A listed place counts anywhere in the sentence, spelled however recognition heard
+    it ("ห้องกลง" is ฮ่องกง). An unlisted name counts only after ที่/แถว/จังหวัด/เมือง/
+    ประเทศ, so "อากาศดีจัง" is not read as a place called "ดีจัง".
+    """
+    from jarvis import places
+
+    hit = places.best_match(t, fuzzy=False)          # exact names, anywhere
+    if hit:
+        return hit[0]
+    left = " ".join(_NOT_PLACE.sub(" ", t).split())   # what remains once weather words are gone
+    if left and left not in {"นี่", "นี้", "นั่น", "บ้าน"}:
+        hit = places.best_match(left, whole=True) or places.best_match(left)
+        if hit:
+            return hit[0]
+    m = re.search(r"(?:ที่|แถว|จังหวัด|เมือง|ประเทศ)\s*(?P<loc>[ก-๙A-Za-z].*)$", t)
+    if not m:
+        return None
+    rest = " ".join(_NOT_PLACE.sub(" ", m["loc"]).split())
+    if not rest or rest in {"นี่", "นี้", "นั่น", "บ้าน", "นี่เนี่ย"}:
+        return None
+    hit = places.best_match(rest, whole=True) or places.best_match(rest)
+    return hit[0] if hit else rest
+
+
 def _weather(t: str) -> list[tuple[str, dict]] | None:
+    t = fix_weather_words(t)
     if not WEATHER.search(t) or re.search(r"^(?:เปิด|ปิด|ตั้ง|ปรับ)(?!.*(?:ไหม|มั้ย|ยังไง|เป็นไง))", t):
         return None
     when = "now"
@@ -151,10 +203,9 @@ def _weather(t: str) -> list[tuple[str, dict]] | None:
     elif re.search(r"วันนี้|ทั้งวัน|เย็นนี้|คืนนี้|บ่ายนี้", t):
         when = "today"
     args: dict = {"when": when}
-    m = re.search(r"(?:ที่|แถว|จังหวัด|เมือง)\s*(?P<loc>[ก-๙A-Za-z][ก-๙A-Za-z .]*?)\s*"
-                  r"(?=วันนี้|พรุ่งนี้|ตอนนี้|สัปดาห์|อาทิตย์|เป็น|ยังไง|ไหม|มั้ย|กี่|ร้อน|หนาว|ฝน|อากาศ|จะ|มี|$)", t)
-    if m and m["loc"].strip() not in {"นี่", "นี้", "นั่น", "บ้าน"}:
-        args["location"] = m["loc"].strip()
+    place = weather_place(t)
+    if place:
+        args["location"] = place
     return [("get_weather", args)]
 
 
@@ -360,6 +411,19 @@ def parse(text: str, last_app: str = "", media: str = "youtube_music") -> list[t
     return None
 
 
+# LINE's built-in chats as people say them in Thai (and as recognition writes them).
+_LINE_CHAT_ALIASES = [(re.compile(r"^(?:คี|คิ|คลิ)\s*[พปบ]\s*(?:เม|มี|เมม)\s*โม$"), "Keep Memo")]
+
+
+def line_chat_name(spoken: str) -> str:
+    """The chat name to look for in LINE: "คลิปมีโม" -> "Keep Memo"; anything else as said."""
+    name = (spoken or "").strip()
+    for pattern, real in _LINE_CHAT_ALIASES:
+        if pattern.match(name):
+            return real
+    return name
+
+
 def parse_line(text: str) -> tuple[str, str] | None:
     """(recipient, message) when LINE is named as the app; case and wording kept as spoken."""
     t = re.sub(r"^(?:(?:hey|เฮ้)\s*)?(?:jarvis|จาร์วิส|จาวิส)[\s,]*", "", (text or "").strip(), flags=re.I)
@@ -373,6 +437,7 @@ def parse_line(text: str) -> tuple[str, str] | None:
     message = re.sub(r"\s*(?:ให้หน่อย|ให้ด้วย|หน่อย)?\s*(?:นะครับ|นะคะ)?$", "", m["text"]).strip()
     if not who or not message or re.search(LINE_APP, who, re.I):
         return None
+    who = line_chat_name(who)
     return who, message
 
 

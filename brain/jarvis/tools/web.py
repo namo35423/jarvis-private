@@ -429,9 +429,38 @@ def preset_place(city: str, language: str = "th") -> dict | None:
             "timezone": p["timezone"]}
 
 
+async def _named_place(ctx: ToolContext, client: httpx.AsyncClient, location: str) -> dict:
+    """A place the user named, however speech recognition spelled it."""
+    from jarvis import places
+
+    th = ctx.cfg.get("language") == "th"
+    preset = preset_place(location, ctx.cfg.get("language"))
+    if preset:
+        return preset
+    hit = places.best_match(location, whole=True)
+    if hit:  # listed: the English name geocodes reliably; Jarvis still says the Thai one
+        place = await _geocode(client, hit[1])
+        if th:
+            place["city"] = hit[0]
+        return place
+    try:
+        return await _geocode(client, location)
+    except ToolError:
+        # "ห้องกง": no such place, but the model knows what sounds like it.
+        assistant = getattr(ctx, "assistant", None)
+        guess = await assistant.interpret_place(location) if hasattr(assistant, "interpret_place") else None
+        if not guess:
+            raise
+        listed = places.best_match(guess, whole=True)
+        place = await _geocode(client, listed[1] if listed else guess)
+        if th and listed:
+            place["city"] = listed[0]
+        return place
+
+
 async def _resolve_place(ctx: ToolContext, client: httpx.AsyncClient, location: str | None) -> dict:
     if location and location.strip():
-        return preset_place(location, ctx.cfg.get("language")) or await _geocode(client, location.strip())
+        return await _named_place(ctx, client, location.strip())
     preset = preset_place(ctx.cfg.get("location.city") or "", ctx.cfg.get("language"))
     if preset:
         return preset  # the switch wins over coordinates cached from an earlier lookup
@@ -536,6 +565,10 @@ def _clock_th(iso: str) -> str:
 
 def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
     city = city.split(",")[0].strip()  # "เชียงใหม่, จังหวัดเชียงใหม่" reads badly aloud
+    here = f"ที่ {city}" if re.match(r"[A-Za-z]", city) else f"ที่{city}"  # "ที่ Munich", "ที่ฮ่องกง"
+
+    def done(text: str) -> str:
+        return text + (" ครับ" if text[-1:].isdigit() else "ครับ")  # "ราวตี 2 ครับ"
     daily = data["daily"]
     days = daily["time"]
     speed = "ไมล์ต่อชั่วโมง" if imperial else "กิโลเมตรต่อชั่วโมง"
@@ -544,7 +577,7 @@ def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
     def day_line(i: int, lead: str) -> str:
         hi, lo = round(daily["temperature_2m_max"][i]), round(daily["temperature_2m_min"][i])
         code = (daily.get("weather_code") or [None] * len(days))[i]
-        out = f"{lead}ที่{city} {_sky_th(code)} สูงสุด {hi} ต่ำสุด {lo} องศา"
+        out = f"{lead}{here} {_sky_th(code)} สูงสุด {hi} ต่ำสุด {lo} องศา"
         pop = (daily.get("precipitation_probability_max") or [None] * len(days))[i]
         if pop and pop >= 30:
             out += f" โอกาสฝนตก {int(pop)} เปอร์เซ็นต์"
@@ -553,7 +586,7 @@ def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
         wind = (daily.get("wind_speed_10m_max") or [0] * len(days))[i] or 0
         if wind >= windy_at:
             out += f" ลมแรงถึง {round(wind)} {speed}"
-        return out + "ครับ"
+        return done(out)
 
     if when == "today":
         return day_line(0, "วันนี้")
@@ -566,7 +599,7 @@ def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
         temp = round(cur.get("temperature_2m", 0))
         feels = round(cur.get("apparent_temperature", temp))
         code = int(cur.get("weather_code") or 0)
-        out = f"ตอนนี้ที่{city} {temp} องศา {_sky_th(code)}"
+        out = f"ตอนนี้{here} {temp} องศา {_sky_th(code)}"
         if abs(feels - temp) >= 4:
             out += f" รู้สึกเหมือน {feels} องศา"
         out += f" วันนี้สูงสุด {round(daily['temperature_2m_max'][0])} ต่ำสุด {round(daily['temperature_2m_min'][0])} องศา"
@@ -581,19 +614,19 @@ def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
         wind = cur.get("wind_speed_10m") or 0
         if wind >= windy_at:
             out += f" ลมแรง {round(wind)} {speed}"
-        return out + "ครับ"
+        return done(out)
     highs = [round(t) for t in daily["temperature_2m_max"]]
     lows = [round(t) for t in daily["temperature_2m_min"]]
     wet = [_DAY_TH[datetime.fromisoformat(days[i]).weekday()]
            for i, c in enumerate(daily.get("weather_code") or []) if int(c or 0) in WET]
-    out = f"สัปดาห์นี้ที่{city} สูงสุด {min(highs)} ถึง {max(highs)} ต่ำสุด {min(lows)} ถึง {max(lows)} องศา"
+    out = f"สัปดาห์นี้{here} สูงสุด {min(highs)} ถึง {max(highs)} ต่ำสุด {min(lows)} ถึง {max(lows)} องศา"
     if not wet:
         out += " ไม่มีฝนทั้งสัปดาห์"
     elif len(wet) <= 3:
         out += " มีฝนวัน" + (wet[0] if len(wet) == 1 else " ".join(wet[:-1]) + " และ" + wet[-1])
     else:
         out += f" ฝนตกเกือบทุกวัน เริ่มวัน{wet[0]}"
-    return out + "ครับ"
+    return done(out)
 
 
 async def weather_card(cfg) -> dict:

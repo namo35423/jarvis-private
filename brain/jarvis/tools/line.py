@@ -290,7 +290,9 @@ def _confirm(args: dict) -> str:
     category="productivity",
 )
 async def line_send(ctx: ToolContext, recipient: str, text: str) -> str:
-    recipient, text = (recipient or "").strip(), (text or "").strip()
+    from jarvis.thai import line_chat_name
+
+    recipient, text = line_chat_name(recipient), (text or "").strip()
     if not recipient or not text:
         raise ToolError("ต้องมีทั้งชื่อคนรับและข้อความครับ")
     proc = await run(["/usr/bin/open", "-b", BUNDLE], timeout=15)

@@ -1172,6 +1172,39 @@ class Assistant:
         )
         return strip_tool_call_text(((data.get("message") or {}).get("content") or "")).strip()
 
+    async def interpret_place(self, heard: str) -> str | None:
+        """Speech recognition spells place names by sound ("ห้องกง" for ฮ่องกง). The model
+        knows which real place sounds like that. Asked from the cached conversation, so it
+        costs a few new tokens rather than a re-read. None when it is not a place."""
+        prompt = (f'ระบบถอดเสียงได้ยินชื่อสถานที่ว่า "{heard}" ซึ่งอาจสะกดผิดเพราะเสียงคล้ายกัน '
+                  "ผู้ใช้น่าจะหมายถึงเมืองหรือประเทศอะไร ตอบเป็นชื่อภาษาอังกฤษสั้นๆ อย่างเดียว เช่น Hong Kong "
+                  "ห้ามเรียกเครื่องมือ ถ้าไม่ใช่ชื่อสถานที่ให้ตอบ NONE")
+        try:
+            data = await asyncio.wait_for(self.llm.chat(
+                self._conversation() + [{"role": "user", "content": prompt}],
+                tools=schemas(), options={"num_predict": 16}), timeout=25)
+        except Exception as exc:  # noqa: BLE001 - a failed guess just means "not found"
+            log.info("place interpretation failed: %s", exc)
+            return None
+        msg = data.get("message") or {}
+        guess = ""
+        for call in msg.get("tool_calls") or []:  # it may answer by calling get_weather anyway
+            args = (call.get("function") or {}).get("arguments") or {}
+            if isinstance(args, str):
+                with contextlib.suppress(ValueError):
+                    args = json.loads(args)
+            if isinstance(args, dict) and args.get("location"):
+                guess = str(args["location"])
+        if not guess:
+            lines = strip_tool_call_text(msg.get("content") or "").strip().splitlines()
+            guess = lines[0] if lines else ""
+        guess = guess.strip().strip("\"'`.*").strip()
+        if not guess or "NONE" in guess.upper() or len(guess) > 50 or re.search(r"[\u0e00-\u0e7f]", guess):
+            log.info("place %r: no confident interpretation (%r)", heard, guess)
+            return None
+        log.info("place %r interpreted as %r", heard, guess)
+        return guess
+
     def _rephrase_of_last(self, text: str):
         """Asking again, a little differently, soon after an answer means it missed -
         even if they never said "that's wrong"."""

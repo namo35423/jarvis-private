@@ -674,3 +674,66 @@ def test_levels_throttle_per_source_and_report_silence_once(monkeypatch):
     a._maybe_send_level("tts", 0.3)
     a._maybe_send_level("tts", 0.4)      # same instant: throttled
     assert [(e["source"], e["value"]) for e in sent] == [("tts", 0.0), ("mic", 0.5), ("tts", 0.3)]
+
+
+# Real transcripts from the user's voice: recognition spells places and weather words by sound.
+@pytest.mark.parametrize('heard,place', [
+    ('ตอนนี้ห้องกลงอุณภูมิเท่าไหร่', 'ฮ่องกง'), ('อุณภูมิที่ห่องคองเนี่ย กี่อุ่งสา', 'ฮ่องกง'),
+    ('อุณภูมิที่ห้องกงกี่องศา', 'ฮ่องกง'), ('อุณภูมิที่ประเทศห้องกลงกี่องศา', 'ฮ่องกง'),
+    ('อุณภูมิที่กรุงเทพกี่อุงสา', 'กรุงเทพฯ'), ('ตอนนี้ที่กุงเทพอุณภูมิกี่องศา', 'กรุงเทพฯ'),
+    ('ตอนนี้ที่ลอนดอน อุณภูมิกี่องศา', 'ลอนดอน'), ('ลอนดอน อุณภูมิกี่องศา', 'ลอนดอน'),
+    ('กูถามว่าลอนดอนกี่องศา', 'ลอนดอน'), ('อากาศที่สิงโปเป็นไง', 'สิงคโปร์'),
+    ('ที่แม่ฮ่องสอนหนาวไหม', 'แม่ฮ่องสอน'), ('อากาศที่ตำบลบางพลีเป็นไง', 'ตำบลบางพลี'),
+])
+def test_misheard_places_still_resolve(heard, place):
+    plan = thai.parse(thai.normalise(heard))
+    assert plan[0][0] == 'get_weather' and plan[0][1].get('location') == place
+
+
+@pytest.mark.parametrize('heard', ['ข้างนอกร้อนไหม', 'อากาศวันนี้เป็นไง', 'พรุ่งนี้ฝนจะตกไหม', 'อากาศดีจัง',
+                                   'อากาศที่นี่เป็นไง', 'อากาศที่บ้านเป็นไง', 'ตอนนี้กี่องศา', 'สัปดาห์นี้ฝนจะตกไหม'])
+def test_weather_without_a_place_stays_here(heard):
+    plan = thai.parse(thai.normalise(heard))
+    assert plan[0][0] == 'get_weather' and 'location' not in plan[0][1]
+
+
+def test_place_sound_keys():
+    from jarvis import places
+    assert places.sound_key('ห้องกง') == places.sound_key('ฮ่องกง')
+    assert places.english_name('ห้องกลง') == 'Hong Kong' and places.english_name('กุงเทพ') == 'Bangkok'
+    assert places.best_match('เลยครับ', fuzzy=False) is None   # Loei is also the word "เลย"
+
+
+@pytest.mark.parametrize('said,expected', [
+    ('ส่ง Line L I N E ไปให้คนชื่อชื่อว่า Somchai ส่งคำว่า Hello World', ('Somchai', 'Hello World')),
+    ('ส่งลายไปที่คลิปมีโมว่าสวัสดี', ('Keep Memo', 'สวัสดี')),
+    ('ส่ง LINE ถึงพี่ต้นบอกว่าเดี๋ยวโทรกลับ', ('พี่ต้น', 'เดี๋ยวโทรกลับ')),
+    ('ส่งข้อความไลน์ให้คุณสมชายข้อความว่าประชุมเลื่อน', ('สมชาย', 'ประชุมเลื่อน')),
+    ('ส่งลายเซ็นให้หัวหน้าว่าเสร็จแล้ว', None),
+])
+def test_line_spoken_phrasings(said, expected):
+    assert thai.parse_line(said) == expected
+
+
+@pytest.mark.asyncio
+async def test_unknown_place_is_interpreted_by_the_model(monkeypatch):
+    from jarvis.tools import web
+    from jarvis.sysutil import ToolError
+    looked_up = []
+
+    async def geocode(client, name):
+        looked_up.append(name)
+        if name == 'Munich':
+            return {'city': 'Munich, Bavaria', 'lat': 48.1, 'lon': 11.6, 'timezone': 'Europe/Berlin'}
+        raise ToolError(f"I could not find a place called {name!r}.")
+
+    class Assistant:
+        async def interpret_place(self, heard):
+            return 'Munich' if heard == 'มิวนิค' else None
+
+    monkeypatch.setattr(web, '_geocode', geocode)
+    ctx = SimpleNamespace(cfg=SimpleNamespace(get=lambda k, d=None: 'th' if k == 'language' else d), assistant=Assistant())
+    assert (await web._named_place(ctx, None, 'มิวนิค'))['city'] == 'Munich, Bavaria'
+    assert looked_up == ['มิวนิค', 'Munich']
+    with pytest.raises(ToolError):
+        await web._named_place(ctx, None, 'ดีจัง')
