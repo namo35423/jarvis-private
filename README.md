@@ -10,6 +10,64 @@ No accounts, no API keys, no subscription. Your voice never leaves the machine.
 Say "Hey Jarvis"   ·   or press ⌘\   ·   or click the icon in the menu bar
 ```
 
+## ฉบับภาษาไทย · Thai-optimized edition
+
+ฉบับนี้ปรับ Jarvis ให้ **ใช้ภาษาไทยได้จริงในชีวิตประจำวัน**: ฟังไทย ตอบเป็นเสียงไทย
+เข้าใจคำพูดแบบคนไทย และสั่งงานแอปที่คนไทยใช้จริงอย่าง LINE และ YouTube Music
+ทุกอย่างยังรันในเครื่อง พัฒนาต่อจาก [BatmanOnTop/jarvis](https://github.com/BatmanOnTop/jarvis) (MIT)
+
+*This edition tunes Jarvis for Thai speakers: Thai speech in and out, everyday Thai
+commands that run without waiting for the model, Thai time and dates, LINE and
+YouTube Music, and a full-size Command Center window.*
+
+**ไม่ได้ฝึกโมเดลใหม่ (no fine-tuning).** ใช้โมเดลโอเพนซอร์สที่รันในเครื่องเหมือนเดิม
+แต่ปรับทุกชั้นรอบโมเดลให้เข้ากับภาษาไทย ตั้งแต่การฟัง การตีความคำสั่ง ไปจนถึงเสียงพูด
+
+### ปรับอะไรมาบ้าง
+
+| ส่วน | ปรับอย่างไร |
+|---|---|
+| **ฟังเสียง (STT)** | ใช้ [MLX Whisper Large V3 Turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo) ฟังไทยปนอังกฤษได้ ถ้าตรวจภาษาได้เป็นภาษาอื่นจะถอดใหม่เป็นไทย แก้คำที่ถอดผิดบ่อย (เช่น "เพียง" → "เพลง") และตัดคำลงท้ายอย่าง ครับ ค่ะ ดิ อ่ะ เว้ย ก่อนตีความ |
+| **ตีความคำสั่งไทย** | ตัวแยกคำสั่งภาษาไทยแบบตายตัว (ไม่ต้องรอ LLM) ครอบคลุมเปิด/ปิดแอปและเว็บไซต์ (ไอจี เฟซบุ๊ก พันทิป ฯลฯ), เพลง, เสียง, แบตเตอรี่, พื้นที่ดิสก์, Wi-Fi, ตั้งเวลา, ปลุก, เตือนความจำ, ปฏิทิน, อากาศ, ค่าเงิน และข่าว: **92 จาก 99 คำสั่งทดสอบทำงานทันที** |
+| **เวลาแบบไทย** | เข้าใจระบบหกชั่วโมง: ตีสอง · บ่ายสาม · หกโมงเย็น · สองทุ่ม รวมถึง พรุ่งนี้ · มะรืน · ศุกร์หน้า ("เตือนกินยาตอนสองทุ่ม" = 20:00 ไม่ใช่ 14:00) |
+| **สมอง (LLM)** | [Qwen3 4B Instruct](https://ollama.com/library/qwen3) ผ่าน Ollama เลือกแทน Qwen3.5 เพราะใช้ KV cache ซ้ำได้: median 1.2 วิ เทียบกับ 6.5 วิต่อคำขอ (วัดบน M3 MacBook Air) และเพิ่มกฎภาษาไทยใน system prompt |
+| **กันตอบมั่ว** | คำถามข้อมูลสด (อากาศ ค่าเงิน ข่าว ราคา) เรียกเครื่องมือก่อนตอบเสมอ ถ้าโมเดลอ้างว่า "ทำแล้ว" โดยไม่ได้ทำจริง จะถูกสั่งให้ทำ หรือต้องบอกตรงๆ ว่ายังไม่ได้ทำ และตัวเลขที่ไม่มีในผลค้นหาจะไม่ถูกพูดออกไป |
+| **เสียงพูด (TTS)** | เสียงไทยของ macOS (Kanya) เป็นค่าเริ่มต้น หรือเสียงไทย neural แบบออฟไลน์ [Wayu-Paxa-TTS-Edge](https://huggingface.co/wayu-ai/wayu-paxa-tts-edge) มีเสียงผู้ชาย 5 แบบ ([วิธีติดตั้ง](brain/tts_runtime/README.md)) |
+| **แอปที่คนไทยใช้** | ส่ง **LINE** ได้ (เช็กชื่อแชทก่อนส่งและถามยืนยันทุกครั้ง) · **YouTube Music** ค้นหา เลือกเพลงที่ชื่อและศิลปินตรง แล้วตรวจว่าเล่นถูกเพลงจริงก่อนตอบ |
+| **ข้อมูลท้องถิ่น** | องศาเซลเซียส · ค้นชื่อสถานที่เป็นภาษาไทย · แปลงค่าเงินเป็นบาท · ข่าวไทย · สลับเมืองระหว่างฮ่องกงกับกรุงเทพฯ ได้ใน Settings |
+| **Command Center** | หน้าต่างขนาดใหญ่ ปรับขยายเต็มจอได้ วงแหวน AI เคลื่อนไหวตามสถานะจริง (ฟัง / คิด / ใช้เครื่องมือ / พูด) มีหน้าแชต เพลง งาน ปฏิทิน ข้อมูลเครื่อง ประวัติ และ Settings |
+
+### ผลวัดจริง (MacBook Pro M1 Pro, 16 GB)
+
+| ทดสอบ | ผล |
+|---|---|
+| เลือกเครื่องมือถูก (69 คำสั่งชีวิตประจำวัน, `qwen3:4b-instruct`) | ก่อนปรับ 57 → หลังปรับ 69 ข้อ¹ |
+| คำพูดแบบอื่นที่ไม่เคยทดสอบ (30 คำสั่ง) | 30/30 |
+| คำสั่งที่ทำงานโดยไม่ต้องรอโมเดล | 92 จาก 99 คำสั่ง ตอบใน 0.1–0.5 วินาที |
+| "เปิดเพลง Shape of You ของ Ed Sheeran" | เล่นถูกเพลงใน 4–5 วินาที (รวมตรวจว่าเล่นจริง) |
+| ถามพยากรณ์อากาศ | ต่ำกว่า 2 วินาที (เดิม 3–6 วินาที) |
+| สร้างเสียงไทย Wayu (หลังโหลดแล้ว) | 0.5–0.7 วินาทีต่อประโยคสั้น |
+| Command Center ตอนว่าง | ประมาณ 17% ของ CPU 1 core ที่ 20 fps |
+
+¹ มี 3 ข้อที่ชุดทดสอบนับผิด (คำทักทาย ขอบคุณ และเลขคณิต ซึ่ง Jarvis ตอบทันทีเอง) ตรวจแล้วว่าตอบถูกเมื่อใช้งานจริง
+
+### ลองพูดว่า
+
+- เปิดเพลง Shape of You ของ Ed Sheeran · ข้ามเพลง · เพลงอะไรอยู่
+- ส่งไลน์หาสมชายว่าเดี๋ยวโทรกลับ *(ถามยืนยันก่อนส่ง)*
+- เตือนกินยาตอนสองทุ่ม · ตั้งปลุกเจ็ดโมงเช้า · ตั้งเวลา 25 นาที
+- พรุ่งนี้ฝนจะตกไหม · 100 ดอลลาร์เป็นกี่บาท · ข่าววันนี้
+- เปิดพันทิป · ปิดแท็บนี้ · สรุปหน้าเว็บนี้ · แบตเหลือเท่าไหร่
+
+### ความเป็นส่วนตัว
+
+การฟัง การถอดเสียง โมเดลแชต และเสียงพูด ทำงานในเครื่องทั้งหมด จะใช้อินเทอร์เน็ตเฉพาะ
+YouTube Music, พยากรณ์อากาศ ([Open-Meteo](https://open-meteo.com)), อัตราแลกเปลี่ยน
+([open.er-api.com](https://open.er-api.com)), ข่าว (Google News RSS) และการค้นเว็บ
+
+ฉบับนี้ตั้งเป็นภาษาไทยไว้เป็นค่าเริ่มต้น (`"language": "th"`, ฟังเสียงด้วย Whisper)
+รายละเอียดการตั้งค่า สิทธิ์ที่ต้องเปิด และวิธีสลับกลับเป็นภาษาอังกฤษ อยู่ใน [THAI.md](THAI.md)
+
 ## Highlights
 
 - **Fast.** Common commands skip the language model entirely: the time, volume,
@@ -29,7 +87,8 @@ Say "Hey Jarvis"   ·   or press ⌘\   ·   or click the icon in the menu bar
   installed, Jarvis can hand off big jobs (write code, build a presentation, deep
   research) and announce the result when it's done. It can even change its own
   code when you ask, with automatic rollback if the change breaks it.
-- **Lives in the menu bar.** No Dock icon, starts at login, always listening.
+- **Lives in the menu bar.** Starts at login, always listening, no Dock icon until
+  you open the full-size **Command Center** window (Spotlight, the Dock, or ⌘0).
 
 ## Requirements
 
@@ -43,7 +102,7 @@ Say "Hey Jarvis"   ·   or press ⌘\   ·   or click the icon in the menu bar
 ## Install
 
 ```bash
-git clone https://github.com/BatmanOnTop/jarvis.git
+git clone https://github.com/namo35423/jarvis-private.git jarvis
 cd jarvis
 ./setup.sh
 ```
@@ -81,9 +140,9 @@ Then:
 | Part | Model | Runs |
 |---|---|---|
 | Wake word | [openWakeWord](https://github.com/dscripka/openWakeWord) "hey jarvis" + Silero VAD | on device, ~1% CPU |
-| Speech to text | [Parakeet TDT 0.6B v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) via MLX | Apple GPU |
+| Speech to text | Thai: [Whisper Large V3 Turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo) via MLX · English mode: [Parakeet TDT 0.6B v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) | Apple GPU |
 | Thinking | [Qwen3 4B Instruct](https://ollama.com/library/qwen3) via Ollama, with tool calling | Apple GPU |
-| Voice | [Kokoro 82M](https://github.com/thewh1teagle/kokoro-onnx) (`bm_george`) | on device, faster than real time |
+| Voice | Thai: macOS Kanya, or [Wayu-Paxa-TTS-Edge](https://huggingface.co/wayu-ai/wayu-paxa-tts-edge) · English mode: [Kokoro 82M](https://github.com/thewh1teagle/kokoro-onnx) (`bm_george`) | on device |
 | Big jobs (optional) | Claude Code CLI | your Claude plan |
 
 A small native Swift app sits in the menu bar. It starts a Python "brain" as its
@@ -94,7 +153,7 @@ crashes or hangs, the app restarts it.
 ```
 app/      Swift menu bar app (build.sh, install.sh)
 brain/    Python assistant: listener, speech, model, tools, memory, learning
-ui/       the dropdown panel (HTML/CSS/JS, WebGL orb)
+ui/       the dropdown panel (WebGL orb) and the Command Center (Canvas 2D core)
 bin/      the `jarvis` command-line tool
 scripts/  model downloads, self-edit guard
 ```
@@ -196,8 +255,11 @@ The models it downloads have their own licenses, which you accept when
 `setup.sh` fetches them:
 
 - Qwen3 — Apache 2.0
+- Whisper Large V3 Turbo — MIT
 - Kokoro 82M — Apache 2.0
 - Parakeet TDT 0.6B v3 — CC BY 4.0
+- Wayu-Paxa-TTS-Edge (optional Thai voice, installed by hand) — **CC BY-NC 4.0
+  (non-commercial use only)**; its inference code is Apache 2.0
 - openWakeWord pre-trained models, including "hey jarvis" — **CC BY-NC-SA 4.0
   (non-commercial use only)**
 - Silero VAD — MIT
