@@ -697,12 +697,57 @@ function paintPerm(node, ok) {
   val.classList.toggle("no", ok === false);
 }
 
+const modelPicker = $("setModel");
+const modelNote = $("modelNote");
+let savingModel = false;
+
+async function refreshModels() {
+  if (savingModel) return;
+  modelPicker.disabled = true;
+  modelNote.textContent = "กำลังโหลดรายการโมเดล…";
+  try {
+    const response = await fetch(`${API_BASE}/api/models`);
+    if (!response.ok) throw new Error();
+    const {models, current} = await response.json();
+    const names = [...new Set([current, ...models].filter(Boolean))];
+    modelPicker.replaceChildren(...names.map(name => new Option(name, name)));
+    modelPicker.value = current;
+    modelPicker.disabled = models.length === 0;
+    modelNote.textContent = models.length ? "ใช้โมเดลที่เลือกกับคำสั่งถัดไป" : "ไม่พบโมเดลใน Ollama";
+  } catch {
+    modelNote.textContent = "โหลดรายการโมเดลไม่ได้ ลองเปิด Settings ใหม่";
+  }
+}
+
+modelPicker.addEventListener("change", async () => {
+  savingModel = true;
+  modelPicker.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE}/api/config`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: "llm.model", value: modelPicker.value}),
+    });
+    if (!response.ok) throw new Error();
+    modelNote.textContent = "บันทึกโมเดลแล้ว";
+  } catch {
+    modelPicker.value = cfgGet("llm.model", "");
+    modelNote.textContent = "เปลี่ยนโมเดลไม่ได้ ลองเปิด Settings ใหม่";
+  } finally {
+    savingModel = false;
+    modelPicker.disabled = false;
+  }
+});
+
 function setDrawer(open) {
   el.drawer.classList.toggle("open", open);
   el.drawer.setAttribute("aria-hidden", String(!open));
   el.settingsBtn.setAttribute("aria-expanded", String(open));
   el.scrim.hidden = !open;
-  if (open) el.setVoice.focus();
+  if (open) {
+    refreshModels();
+    el.setVoice.focus();
+  }
 }
 
 el.settingsBtn.addEventListener("click", () => setDrawer(!el.drawer.classList.contains("open")));

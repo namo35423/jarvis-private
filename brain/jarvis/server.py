@@ -87,6 +87,7 @@ class Server:
         a.router.add_post("/api/say", self.api_say)
         a.router.add_post("/api/listening", self.api_listening)
         a.router.add_post("/api/grant", self.api_grant)
+        a.router.add_get("/api/models", self.api_models)
         a.router.add_get("/api/config", self.api_config)
         a.router.add_post("/api/config", self.api_set_config)
         a.router.add_get("/", self.index)
@@ -257,6 +258,10 @@ class Server:
         self.assistant.broadcast({"type": "notice", "level": "info", "text": text})
         return web.json_response({"results": results, "summary": text})
 
+    async def api_models(self, request: web.Request) -> web.Response:
+        models = await self.assistant.llm.list_models()
+        return web.json_response({"models": sorted(models), "current": self.assistant.llm.model})
+
     async def api_config(self, request: web.Request) -> web.Response:
         return web.json_response(self.cfg.as_dict())
 
@@ -265,8 +270,15 @@ class Server:
         path, value = data.get("path"), data.get("value")
         if not path:
             return web.json_response({"error": "path is required"}, status=400)
+        if path == "llm.model":
+            if value not in await self.assistant.llm.list_models():
+                return web.json_response({"error": "Model is not installed in Ollama"}, status=400)
+            self.assistant._ollama_ready = True
         self.cfg.set(path, value)
         self._apply_config(path, value)
+        if path == "llm.model":
+            self.assistant.broadcast({"type": "config", "config": self.cfg.as_dict()})
+            self.assistant.broadcast(self.assistant.status())
         return web.json_response({"ok": True, "config": self.cfg.as_dict()})
 
     # ---------------------------------------------------------------- static

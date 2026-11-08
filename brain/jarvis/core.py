@@ -741,6 +741,7 @@ class Assistant:
         final_text = ""
         rounds = int(self.cfg.get("llm.max_tool_rounds", 4)) + (3 if corrected else 0)
         tool_schemas = schemas()
+        model = self.llm.model
         ctx = ToolContext(self)
 
         try:
@@ -749,7 +750,7 @@ class Assistant:
                 calls = []
                 error = ""
 
-                async for chunk in self.llm.chat_stream(convo, tool_schemas):
+                async for chunk in self.llm.chat_stream(convo, tool_schemas, model=model):
                     if chunk.kind == "text":
                         assistant_text += chunk.text
                     elif chunk.kind == "tool_calls":
