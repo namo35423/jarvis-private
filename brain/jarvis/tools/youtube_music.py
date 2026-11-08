@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from urllib.parse import quote
 from jarvis.sysutil import ToolError, applescript_quote, osascript, run
 from jarvis.tools import ToolContext, tool
@@ -79,6 +80,40 @@ return {vid:vid||new URLSearchParams(location.search).get('v')||'', paused:v?v.p
  ready:v?v.readyState:0, title:(md&&md.title)||tx('ytmusic-player-bar .title'),
  artist:(md&&md.artist)||tx('ytmusic-player-bar .byline'), ad:!!(mp&&mp.classList.contains('ad-showing'))};
 })())'''
+
+# Everything the Command Center's music card shows. Read-only.
+SNAPSHOT = r"""JSON.stringify((()=>{
+const v=document.querySelector('video'); const md=navigator.mediaSession&&navigator.mediaSession.metadata;
+const tx=s=>{const e=document.querySelector(s);return e?(e.textContent||'').replace(/\s+/g,' ').trim():''};
+const mp=document.querySelector('#movie_player'); const by=tx('ytmusic-player-bar .byline').split('•').map(x=>x.trim());
+let art='';
+if(md&&md.artwork&&md.artwork.length){const px=a=>parseInt(String(a.sizes||'0').split('x')[0])||0;art=[...md.artwork].sort((a,b)=>px(b)-px(a))[0].src||'';}
+if(!art){const i=document.querySelector('ytmusic-player-bar img.image, ytmusic-player-bar .thumbnail img, ytmusic-player-bar img');art=i?(i.src||''):'';}
+return {title:(md&&md.title)||tx('ytmusic-player-bar .title'), artist:(md&&md.artist)||by[0]||'', album:(md&&md.album)||by[1]||'',
+ art, paused:v?v.paused:true, time:v?v.currentTime:0, duration:v&&isFinite(v.duration)?v.duration:0,
+ media:!!(v&&v.currentSrc), ad:!!(mp&&mp.classList.contains('ad-showing'))};
+})())"""
+
+
+async def player_snapshot() -> dict:
+    """What YouTube Music is playing right now. Never launches Chrome to find out."""
+    try:
+        if (await run(["/usr/bin/pgrep", "-x", "Google Chrome"], timeout=3)).returncode != 0:
+            return {"available": False, "reason": "chrome_closed"}
+        raw = await osascript(_in_tab(f"return execute t javascript {applescript_quote(SNAPSHOT)}"), timeout=5)
+    except ToolError as exc:
+        return {"available": False, "reason": "error", "detail": str(exc)[:200]}
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return {"available": False, "reason": "js_blocked", "detail": JS_HELP}
+    if not isinstance(data, dict) or data.get("error"):
+        return {"available": False, "reason": (data or {}).get("error", "bad_result") if isinstance(data, dict) else "bad_result"}
+    data["available"] = bool(data.get("title")) and bool(data.get("media"))
+    if not data["available"]:
+        data["reason"] = "nothing_loaded"
+    return data
+
 
 # Playable results on the search page, in page order (top result first).
 RESULTS = r'''JSON.stringify((()=>{
@@ -198,10 +233,14 @@ async def play_song(query: str, artist: str = "") -> str:
         raise ToolError("ระบุชื่อเพลงด้วยครับ")
     search = (f"เพลง{title}" if mood and not title.startswith("เพลง") and re.search(r"[\u0e00-\u0e7f]", title)
               else f"{title} {artist}".strip())
+    t0 = time.monotonic()
     await _navigate(YTM + "search?q=" + quote(search))
+    t_nav = time.monotonic()
 
     items: list[dict] = []
+    polls = 0
     for _ in range(30):  # results render a moment after the page loads
+        polls += 1
         await asyncio.sleep(0.4)
         page = await _js_raw(RESULTS)
         if page.get("error") == "no_tab":
@@ -214,6 +253,7 @@ async def play_song(query: str, artist: str = "") -> str:
     if not items:
         raise ToolError(f"ไม่พบผลค้นหา {search} ใน YouTube Music ครับ")
 
+    t_found = time.monotonic()
     pick = choose_result(items, "" if mood else title, artist)
     log.info("youtube_music %r by %r: %d results, picked %s", title, artist, len(items),
              pick and {k: pick[k] for k in ("id", "title", "sub")})
@@ -226,7 +266,11 @@ async def play_song(query: str, artist: str = "") -> str:
     clicked = await _js_raw(_clickjs(pick["id"]))
     if clicked.get("error"):
         await _navigate(YTM + "watch?v=" + pick["id"])
-    return await _verify_playing(pick, before)
+    result = await _verify_playing(pick, before)
+    # Where the time goes, so a slow request can be diagnosed from the log alone.
+    log.info("youtube_music timing: open search %.1fs, results %.1fs (%d polls), start+verify %.1fs",
+             t_nav - t0, t_found - t_nav, polls, time.monotonic() - t_found)
+    return result
 
 
 def _compact(text: str) -> str:

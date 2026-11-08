@@ -13,6 +13,9 @@ final class DropdownPanel: NSPanel {
 @MainActor
 final class MenuPanelController: NSObject, WKNavigationDelegate, NSWindowDelegate {
 
+    /// The panel's "Command Center" button.
+    var onOpenCommandCenter: (() -> Void)?
+
     private let endpoints: Endpoints
     private let panel: DropdownPanel
     private let web: WKWebView
@@ -55,11 +58,18 @@ final class MenuPanelController: NSObject, WKNavigationDelegate, NSWindowDelegat
 
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = true
+        let bridge = PanelBridge()
+        config.userContentController.add(bridge, name: "jarvisHost")
+        config.userContentController.addUserScript(WKUserScript(
+            source: "window.JARVIS_NATIVE = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         web = WKWebView(frame: glass.bounds, configuration: config)
         web.autoresizingMask = [.width, .height]
         web.setValue(false, forKey: "drawsBackground")   // let the glass show through
 
         super.init()
+        bridge.onMessage = { [weak self] cmd in
+            if cmd == "openCommandCenter" { self?.onOpenCommandCenter?() }
+        }
 
         web.navigationDelegate = self
         glass.addSubview(web)
@@ -158,7 +168,7 @@ final class MenuPanelController: NSObject, WKNavigationDelegate, NSWindowDelegat
 
     /// Links open in the real browser, never inside the panel.
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
-                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let url = action.request.url, action.navigationType == .linkActivated,
            url.host != "127.0.0.1" {
             NSWorkspace.shared.open(url)
@@ -175,5 +185,15 @@ enum Logs {
     static func open() {
         let target = FileManager.default.fileExists(atPath: Paths.brainLog.path) ? Paths.brainLog : Paths.logsDir
         NSWorkspace.shared.open(target)
+    }
+}
+
+/// Messages from the panel page. Held weakly by nothing: the controller owns the closure.
+private final class PanelBridge: NSObject, WKScriptMessageHandler {
+    var onMessage: ((String) -> Void)?
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any], let cmd = body["cmd"] as? String else { return }
+        MainActor.assumeIsolated { onMessage?(cmd) }
     }
 }

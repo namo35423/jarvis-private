@@ -210,7 +210,8 @@ class Listener(threading.Thread):
         speaking = self.is_speaking()
         if speaking and not self.cfg.get("listening.barge_in", True):
             return
-        if self.wake_ready and self.oww is not None:
+        # Wake word off = push-to-talk only (hotkey, Command Center button); the mic stays live.
+        if self.wake_ready and self.oww is not None and self.cfg.get("listening.wake_word_enabled", True):
             self._wake_frame(frame, speaking)
 
     def _wake_frame(self, frame: np.ndarray, speaking: bool) -> None:

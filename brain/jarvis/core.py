@@ -242,7 +242,8 @@ class Assistant:
         self._pending_confirm: dict | None = None
         self._pending_announcements: list[tuple[str, str]] = []
         self._mic_status = "unknown"
-        self._last_level_sent = 0.0
+        self._level_sent: dict[str, float] = {}
+        self._level_silent: dict[str, bool] = {}
         self._followup_task: asyncio.Task | None = None
         self._failed_calls: set[str] = set()
         self._blocked_tools: set[str] = set()
@@ -528,10 +529,16 @@ class Assistant:
                 self.set_state(IDLE)
 
     def _maybe_send_level(self, source: str, value: float) -> None:
+        # Throttled per source: the speaker reports its level continuously, and with one
+        # shared limit its silence crowded out the microphone while listening.
         now = time.monotonic()
-        if now - self._last_level_sent < 1.0 / LEVEL_HZ:
+        if now - self._level_sent.get(source, 0.0) < 1.0 / LEVEL_HZ:
             return
-        self._last_level_sent = now
+        silent = float(value) <= 0.001
+        if silent and self._level_silent.get(source):
+            return  # silence is reported once, not 30 times a second
+        self._level_silent[source] = silent
+        self._level_sent[source] = now
         self.broadcast({"type": "level", "source": source, "value": round(float(value), 3)})
 
     def _on_output_level(self, value: float) -> None:
@@ -624,13 +631,13 @@ class Assistant:
         line = thai.parse_line(text)  # before lowercasing: the message goes out as spoken
         if line:
             args = {"recipient": line[0], "text": line[1]}
-            result = await execute(ToolContext(self), "line_send", args)
+            result = await self._exec("line_send", args)
             self._record_fast("line_send", args, result)
             return await self._quick_reply(thai.localise_result("line_send", args, result), speak)
         song = _PLAY_SONG.match(t) if self.cfg.get("media.preferred") == "youtube_music" else None
         if song and not _NOT_A_TITLE.match(song["title"]):
             args = {"action": "play", "query": song["title"], **({"artist": song["artist"]} if song["artist"] else {})}
-            result = await execute(ToolContext(self), "youtube_music", args)
+            result = await self._exec("youtube_music", args)
             self._record_fast("youtube_music", args, result)
             return await self._quick_reply(thai.localise_result("youtube_music", args, result), speak)
         if thai.THAI.search(t):
@@ -649,7 +656,7 @@ class Assistant:
             if plan:
                 results = []
                 for name, args in plan:
-                    result = await execute(ToolContext(self), name, args)
+                    result = await self._exec(name, args)
                     self._record_fast(name, args, result)
                     results.append(thai.localise_result(name, args, result))
                     if result.startswith(("Error:", "Cancelled by the user")):
@@ -703,7 +710,7 @@ class Assistant:
             if not m:
                 continue
             try:
-                result = await execute(ToolContext(self), name, build(m))
+                result = await self._exec(name, build(m))
             except Exception:
                 log.exception("fast path %s failed", name)
                 break
@@ -722,8 +729,42 @@ class Assistant:
 
         return None
 
+    async def _exec(self, name: str, args: dict, turn: str | None = None) -> str:
+        """Run one tool outside a model turn (fast path, Command Center buttons), visibly:
+        the UI gets the same tool events as a model call and shows EXECUTING meanwhile."""
+        turn = turn or getattr(self, "_current_turn", "") or "fast"
+        call_id = uuid.uuid4().hex[:6]
+        prev = self.state
+        from_ui = turn == "ui"
+        self.broadcast({"type": "tool", "turn": turn, "id": call_id, "name": name,
+                        "args": args, "status": "running", "result": None})
+        if not from_ui or prev in (IDLE, MUTED):
+            self.set_state(WORKING, name)
+        log.info("tool %s(%s) [%s]", name, args, "button" if from_ui else "direct")
+        started = time.monotonic()
+        try:
+            result = await execute(ToolContext(self), name, args)
+        finally:
+            if self.state in (WORKING, THINKING) and (not from_ui or prev in (IDLE, MUTED)):
+                self.set_state(prev if from_ui else IDLE)
+        failed = result.startswith("Error:")
+        log.info("tool %s returned %d chars in %.1fs%s", name, len(result), time.monotonic() - started,
+                 " (error)" if failed else "")
+        self.broadcast({"type": "tool", "turn": turn, "id": call_id, "name": name, "args": args,
+                        "status": "error" if failed else "ok", "result": result[:400]})
+        return result
+
+    async def run_ui_tool(self, name: str, args: dict) -> str:
+        """A Command Center button: the real tool, with the usual confirmations."""
+        result = await self._exec(name, args, turn="ui")
+        if self.cfg.get("language") == "th":
+            return thai.localise_result(name, args, result)
+        if result.startswith("Cancelled by the user"):
+            return "Cancelled."  # the model-facing "do not retry" note means nothing on a button
+        return result
+
     async def _fast_tool(self, name: str, args: dict, text: str, speak: bool) -> str | None:
-        result = await execute(ToolContext(self), name, args)
+        result = await self._exec(name, args)
         self._record_fast(name, args, result)
         if result.startswith("Error:"):
             self._last_episode_at = 0.0
@@ -1017,7 +1058,12 @@ class Assistant:
             "name": call.name, "args": call.arguments, "status": "running", "result": None,
         })
         log.info("tool %s(%s)", call.name, call.arguments)
-        result = await execute(ctx, call.name, call.arguments)
+        self.set_state(WORKING, call.name)
+        try:
+            result = await execute(ctx, call.name, call.arguments)
+        finally:
+            if self.state == WORKING:
+                self.set_state(THINKING)
         if self.cfg.get("language") == "th" and not result.startswith(("Error:", "Cancelled by the user")):
             result = thai.localise_result(call.name, call.arguments, result)
         failed = isinstance(result, str) and result.startswith("Error:")

@@ -107,6 +107,7 @@ async def test_real_fast_dispatch_mocked_actions(monkeypatch):
  a=object.__new__(Assistant)
  a.cfg=SimpleNamespace(get=lambda k,d=None:'youtube_music' if k=='media.preferred' else d)
  a.memory=a.scheduler=a.jobs=None;a._last_app='';a._record_fast=Mock();a._quick_reply=AsyncMock(side_effect=lambda t,s:t)
+ a.state='idle';a.state_detail=None;a.clients=set()
  fn=AsyncMock(side_effect=['Google Chrome is open.','เปิด YouTube Music ให้แล้วครับ','Volume 30 percent.'])
  monkeypatch.setattr(core,'execute',fn)
  reply=await a._fast_path('เปิด Google Chrome แล้วเข้า YouTube Music ให้หน่อย',False)
@@ -356,6 +357,7 @@ async def test_fast_path_routes_line_and_english_song(monkeypatch):
  a=Assistant.__new__(Assistant)
  a.cfg=SimpleNamespace(get=lambda k,d=None:'youtube_music' if k=='media.preferred' else d)
  a.memory=Mock(); a.scheduler=a.jobs=None; a._last_app=''; a._record_fast=Mock(); a._quick_reply=AsyncMock(side_effect=lambda t,s:t)
+ a.state='idle'; a.state_detail=None; a.clients=set()
  await a._fast_path('ส่งข้อความถึง Somchai ผ่าน LINE ว่า Hello World',False)
  await a._fast_path('play shape of you by ed sheeran',False)
  await a._fast_path('play',False)
@@ -627,3 +629,48 @@ async def test_commands_wait_for_startup_instead_of_failing():
     assert not task.done() and not a._fast_path.called   # tools are not loaded yet
     a._started.set()
     assert await asyncio.wait_for(task, 1) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_fast_path_tools_are_visible_as_executing(monkeypatch):
+    import jarvis.core as core
+    a = object.__new__(Assistant)
+    a.cfg = SimpleNamespace(get=lambda k, d=None: d)
+    a.state, a.state_detail, a.clients, a._current_turn = "idle", None, set(), "t1"
+    a.memory = a.scheduler = a.jobs = None
+    seen = []
+    a.broadcast = lambda e: seen.append(e)
+
+    async def fake_execute(ctx, name, args):
+        assert a.state == "working" and a.state_detail == name  # EXECUTING while the tool runs
+        return "Error: nope" if name == "bad" else "ok"
+    monkeypatch.setattr(core, "execute", fake_execute)
+    assert await a._exec("open_app", {"name": "Calculator"}) == "ok"
+    assert a.state == "idle"
+    tools = [e for e in seen if e["type"] == "tool"]
+    assert [t["status"] for t in tools] == ["running", "ok"] and tools[0]["turn"] == "t1"
+    await a._exec("bad", {})
+    assert [e for e in seen if e["type"] == "tool"][-1]["status"] == "error"
+    # A Command Center button pressed mid-answer leaves the answer's state alone.
+    a.state = "thinking"
+    async def plain(ctx, name, args): return "ok"
+    monkeypatch.setattr(core, "execute", plain)
+    await a._exec("youtube_music", {"action": "next"}, turn="ui")
+    assert a.state == "thinking"
+
+
+def test_levels_throttle_per_source_and_report_silence_once(monkeypatch):
+    import jarvis.core as core
+    a = object.__new__(Assistant)
+    a._level_sent, a._level_silent, sent = {}, {}, []
+    a.broadcast = sent.append
+    clock = [100.0]
+    monkeypatch.setattr(core.time, "monotonic", lambda: clock[0])
+    a._maybe_send_level("tts", 0.0)
+    clock[0] += 0.1
+    a._maybe_send_level("tts", 0.0)      # the speaker's ongoing silence: not repeated
+    a._maybe_send_level("mic", 0.5)      # and it no longer starves the microphone
+    clock[0] += 0.1
+    a._maybe_send_level("tts", 0.3)
+    a._maybe_send_level("tts", 0.4)      # same instant: throttled
+    assert [(e["source"], e["value"]) for e in sent] == [("tts", 0.0), ("mic", 0.5), ("tts", 0.3)]

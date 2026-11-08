@@ -332,6 +332,24 @@ class Learning:
             episodes = self.memory.db.execute("SELECT COUNT(*) c FROM episodes").fetchone()["c"]
         return {"lessons": lessons, "skills": skills, "episodes": episodes, "tools": tools}
 
+    def recent_episodes(self, limit: int = 60) -> dict[str, Any]:
+        """What Jarvis did lately, newest first: request, tools used, outcome, time taken."""
+        with self.memory._lock:
+            rows = self.memory.db.execute(
+                "SELECT id, ts, request, plan, reply, errors, corrected, seconds FROM episodes "
+                "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            tools = [dict(r) for r in self.memory.db.execute(
+                "SELECT name, calls, failures, last_error FROM tool_stats ORDER BY calls DESC").fetchall()]
+        out = []
+        for r in rows:
+            item = dict(r)
+            try:
+                item["plan"] = [step.get("name") for step in json.loads(item["plan"] or "[]")]
+            except (ValueError, AttributeError):
+                item["plan"] = []
+            out.append(item)
+        return {"episodes": out, "tools": tools}
+
     # ------------------------------------------------------------- internals
     async def _distill(self, prompt: str) -> str:
         """One short local-model call. Never Claude: learning must be free."""

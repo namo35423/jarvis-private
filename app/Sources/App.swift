@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var supervisor: BrainSupervisor!
     private var monitor: StateMonitor!
     private var panel: MenuPanelController!
+    private var commandCenter: CommandCenterController!
     private var permissionsWC: PermissionsWindowController?
     private var statusItem: NSStatusItem!
     private let contextMenu = NSMenu()
@@ -36,6 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         client = BrainClient(endpoints: endpoints)
         panel = MenuPanelController(endpoints: endpoints)
+        commandCenter = CommandCenterController(endpoints: endpoints)
+        commandCenter.onRestartBrain = { [weak self] in self?.menuRestart() }
+        commandCenter.onPermissions = { [weak self] in self?.menuPermissions() }
+        panel.onOpenCommandCenter = { [weak self] in
+            self?.panel.hide()
+            self?.commandCenter.show()
+        }
 
         buildStatusItem()
 
@@ -46,7 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         supervisor.onFatal = { [weak self] title, message in
             self?.alert(title: title, message: message)
         }
-        supervisor.onRespawn = { [weak self] in self?.panel.reload() }
+        supervisor.onRespawn = { [weak self] in
+            self?.panel.reload()
+            self?.commandCenter.reload()
+        }
 
         monitor = StateMonitor(url: endpoints.ws)
         monitor.onState = { [weak self] state in
@@ -68,21 +79,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enableLoginItemOnce()
         PermissionsWindowController.requestMicrophoneOnFirstLaunch()
 
-        // Opened by hand (Finder, Spotlight, Launchpad): show that it is alive.
+        // Opened by hand (Finder, Spotlight, Launchpad, Dock): the Command Center.
         // Started at login: stay silent in the menu bar.
         if !launchedAtLogin {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                guard let self else { return }
-                self.panel.show(relativeTo: self.statusItem.button)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.commandCenter.show()
             }
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    /// Launching Jarvis again while it runs (e.g. from Spotlight) opens the panel.
+    /// Launching Jarvis again while it runs (Spotlight, Finder, a Dock click) opens the Command Center.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        panel.show(relativeTo: statusItem.button)
+        panel.hide()
+        commandCenter.show()
         return true
     }
 
@@ -190,6 +201,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        let center = NSMenuItem(title: "Open Command Center", action: #selector(menuCommandCenter), keyEquivalent: "")
+        center.target = self
+        menu.addItem(center)
+        menu.addItem(.separator())
+
         let talk = NSMenuItem(title: "Talk to Jarvis", action: #selector(menuTalk), keyEquivalent: "")
         talk.target = self
         if hotKeyBinding != .none {
@@ -234,6 +250,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func menuShow() { panel.show(relativeTo: statusItem.button) }
+
+    @objc private func menuCommandCenter() {
+        panel.hide()
+        commandCenter.show()
+    }
 
     @objc private func menuTalk() { activateBrain() }
 
@@ -295,6 +316,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let center = NSMenuItem(title: "Open Command Center", action: #selector(menuCommandCenter), keyEquivalent: "0")
+        center.target = self
+        appMenu.addItem(center)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide Jarvis", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Jarvis", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
@@ -312,6 +339,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         main.addItem(editItem)
+
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        let full = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        full.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(full)
+        viewItem.submenu = viewMenu
+        main.addItem(viewItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = main
     }

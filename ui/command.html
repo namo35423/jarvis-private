@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>JARVIS — Command Center</title>
+<link rel="stylesheet" href="command.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><div class="grid"></div><div class="scan"></div><div class="vignette"></div></div>
+
+<div class="shell" id="shell">
+  <!-- ============================================================ sidebar -->
+  <aside class="side glass">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45"/>
+        <circle cx="20" cy="20" r="11" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="14 4"/>
+        <circle cx="20" cy="20" r="4.5" fill="currentColor"/>
+      </svg>
+      <div>
+        <div class="brandName">JARVIS</div>
+        <div class="brandSub">COMMAND CENTER</div>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav" aria-label="Sections">
+      <button data-view="dashboard" class="active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Dashboard</span></button>
+      <button data-view="chat"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>AI Chat</span></button>
+      <button data-view="voice"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Voice Assistant</span></button>
+      <button data-view="music"><svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><span>Music Control</span></button>
+      <button data-view="tasks"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg><span>Tasks &amp; Reminders</span></button>
+      <button data-view="calendar"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Calendar</span></button>
+      <button data-view="monitor"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>System Monitor</span></button>
+      <button data-view="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Activity History</span></button>
+      <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg><span>Settings</span></button>
+    </nav>
+
+    <div class="sideLabel">QUICK ACTIONS</div>
+    <div class="quick">
+      <button data-action="open_ytm"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></svg>Open YouTube Music</button>
+      <button data-action="open_chrome"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5h8M8.9 13.8 4.6 7M15 13.8 11 21"/></svg>Open Chrome</button>
+      <button data-action="open_vscode"><svg viewBox="0 0 24 24"><path d="M17 3l4 2v14l-4 2-10-9 10-9zM17 3v18M7 12 3 9v6z"/></svg>Open VS Code</button>
+      <button data-action="study_mode"><svg viewBox="0 0 24 24"><path d="M4 19V6a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2zM8 8h7"/></svg>Start Study Mode</button>
+      <button id="qaMute"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"/></svg><span>Mute Microphone</span></button>
+    </div>
+
+    <div class="sideFoot">
+      <span class="dot" id="linkDot"></span><span id="linkText">CONNECTING</span>
+      <span class="grow"></span><span class="mono" id="sideFps" title="AI core frame rate"></span>
+    </div>
+  </aside>
+
+  <!-- ============================================================ main -->
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb">
+        <h1 id="viewTitle">Dashboard</h1>
+        <span id="viewSub">AI CORE · LIVE</span>
+      </div>
+      <div class="topRight">
+        <span class="chip" id="chipState"><i></i><b>OFFLINE</b></span>
+        <span class="chip mono" id="chipModel">—</span>
+        <button class="iconBtn" id="togglePanel" title="แสดง/ซ่อนข้อมูลด้านขวา" aria-label="Toggle live panel"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+      </div>
+    </header>
+
+    <!-- Dashboard -->
+    <section class="view active" id="view-dashboard" data-title="Dashboard" data-sub="AI CORE · LIVE">
+      <div class="stageSlot" id="dashSlot">
+        <div class="stage" id="stage">
+          <canvas id="core" aria-hidden="true"></canvas>
+          <div class="hud tl"><span>STATE</span><b id="hudState">—</b></div>
+          <div class="hud tr"><span>MODEL</span><b id="hudModel">—</b></div>
+          <div class="hud bl"><span>LAST STT</span><b id="hudStt">—</b></div>
+          <div class="hud br"><span>LEVEL</span><b id="hudLevel">—</b></div>
+          <div class="coreLabel">
+            <div class="stateWord" id="stateWord">CONNECTING</div>
+            <div class="stateDetail" id="stateDetail"></div>
+          </div>
+        </div>
+      </div>
+      <div class="convo glass" id="dashConvo">
+        <div class="line user"><span class="who">YOU</span><span class="text" id="dashUser">—</span></div>
+        <div class="line jarvis"><span class="who">JARVIS</span><div class="text md" id="dashReply">—</div></div>
+        <div class="toolRow" id="dashTools"></div>
+      </div>
+      <form class="composer glass" id="dashForm" autocomplete="off">
+        <button type="button" class="ptt" data-ptt><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>กดเพื่อพูด</span></button>
+        <input name="text" placeholder="พิมพ์คำสั่งภาษาไทยหรืออังกฤษ แล้วกด Enter  ·  ⌘\ เพื่อพูด" aria-label="Command">
+        <label class="speakToggle" title="ให้ JARVIS พูดคำตอบ"><input type="checkbox" data-speak checked><span>พูดตอบ</span></label>
+        <button class="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
+      </form>
+    </section>
+
+    <!-- Chat -->
+    <section class="view" id="view-chat" data-title="AI Chat" data-sub="HISTORY · TOOLS · MODELS">
+      <div class="chatHead glass">
+        <label class="field inline">โมเดล <select id="chatModel"></select></label>
+        <span class="note" id="chatModelNote"></span>
+        <span class="grow"></span>
+        <button class="btn ghost" id="chatMore">โหลดประวัติเพิ่ม</button>
+        <button class="btn ghost" id="chatNew">เริ่มบทสนทนาใหม่</button>
+      </div>
+      <div class="chatLog glass" id="chatLog" aria-live="polite"></div>
+      <form class="composer glass" id="chatForm" autocomplete="off">
+        <button type="button" class="ptt" data-ptt><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>พูด</span></button>
+        <textarea name="text" rows="1" placeholder="พิมพ์ข้อความ… (Enter ส่ง, Shift+Enter ขึ้นบรรทัดใหม่)" aria-label="Message"></textarea>
+        <label class="speakToggle"><input type="checkbox" data-speak checked><span>พูดตอบ</span></label>
+        <button class="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
+      </form>
+    </section>
+
+    <!-- Voice -->
+    <section class="view" id="view-voice" data-title="Voice Assistant" data-sub="HEY JARVIS · PUSH TO TALK">
+      <div class="voiceGrid">
+        <div class="stageSlot" id="voiceSlot"></div>
+        <div class="voiceSide">
+          <div class="card glass">
+            <h3>การฟัง</h3>
+            <div class="row"><span>Wake word “Hey Jarvis”</span><input type="checkbox" class="switch" data-cfg="listening.wake_word_enabled"></div>
+            <div class="row"><span>ไมโครโฟน</span><button class="btn" id="voiceMute">ปิดไมค์</button></div>
+            <div class="row"><span>ระดับเสียงไมค์ (ขณะฟัง)</span><div class="meter"><i id="micMeter"></i></div></div>
+            <button class="btn primary wide" data-ptt>กดเพื่อพูด</button>
+            <p class="note">กด ⌘\ จากแอปไหนก็ได้ หรือพูด “Hey Jarvis” · ไมค์จะส่งระดับเสียงเฉพาะตอนกำลังฟังจริง</p>
+          </div>
+          <div class="card glass">
+            <h3>สถานะเสียง</h3>
+            <dl class="kv" id="voiceKv"></dl>
+          </div>
+          <div class="card glass grow">
+            <h3>สิ่งที่ได้ยินล่าสุด</h3>
+            <ol class="heard" id="heard"></ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Music -->
+    <section class="view" id="view-music" data-title="Music Control" data-sub="YOUTUBE MUSIC">
+      <div class="musicHero glass" id="musicHero">
+        <div class="art" id="musicArt"><div class="artEmpty">♪</div></div>
+        <div class="musicMeta">
+          <div class="eyebrow" id="musicStatus">—</div>
+          <h2 id="musicTitle">ยังไม่มีเพลง</h2>
+          <div class="artist" id="musicArtist"></div>
+          <div class="album" id="musicAlbum"></div>
+          <div class="progress"><span class="mono" id="musicPos">0:00</span><div class="bar"><i id="musicBar"></i></div><span class="mono" id="musicDur">0:00</span></div>
+          <div class="transport">
+            <button class="round" data-music="previous" title="เพลงก่อนหน้า" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5 9 12l10 7z"/></svg></button>
+            <button class="round big" data-music="toggle" id="musicToggle" title="เล่น/หยุด" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+            <button class="round" data-music="next" title="เพลงถัดไป" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l10 7-10 7z"/></svg></button>
+            <div class="vol"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg><input type="range" id="musicVol" min="0" max="100" step="1" aria-label="System volume"><span class="mono" id="musicVolOut">—</span></div>
+          </div>
+        </div>
+      </div>
+      <form class="composer glass" id="musicForm" autocomplete="off">
+        <svg class="lead" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input name="q" placeholder="ชื่อเพลง เช่น Shape of You ของ Ed Sheeran" aria-label="Song">
+        <button class="btn primary" type="submit">เปิดเพลง</button>
+        <button class="btn ghost" type="button" data-music="open">เปิด YouTube Music</button>
+        <button class="btn ghost" type="button" data-music="liked">เพลงที่ชอบ</button>
+      </form>
+      <p class="note pad" id="musicNote">ควบคุมผ่านเครื่องมือ YouTube Music เดิมใน Chrome · ตรวจว่าเพลงเล่นจริงก่อนรายงาน</p>
+    </section>
+
+    <!-- Tasks -->
+    <section class="view" id="view-tasks" data-title="Tasks & Reminders" data-sub="TIMERS · REMINDERS">
+      <div class="cols">
+        <div class="card glass">
+          <h3>ตั้งเวลาที่กำลังนับ</h3>
+          <ul class="list" id="timerList"></ul>
+          <form class="inlineForm" id="timerForm" autocomplete="off">
+            <input name="duration" placeholder="ระยะเวลา เช่น 25 minutes" required>
+            <input name="label" placeholder="ชื่อ (ไม่บังคับ)">
+            <button class="btn primary">ตั้งเวลา</button>
+          </form>
+          <button class="btn ghost" data-act="timers_cancel_all">ยกเลิกทั้งหมด</button>
+        </div>
+        <div class="card glass">
+          <h3>Reminders</h3>
+          <div class="btnRow"><button class="btn" data-act="reminders_today">วันนี้</button><button class="btn" data-act="reminders_all">ทั้งหมด</button></div>
+          <div class="result" id="remindersOut">กด “วันนี้” เพื่ออ่านจากแอป Reminders (ครั้งแรก macOS อาจขอสิทธิ์)</div>
+          <form class="inlineForm" id="reminderForm" autocomplete="off">
+            <input name="text" placeholder="เตือนเรื่อง เช่น โทรหาแม่" required>
+            <input name="when" placeholder="เมื่อไร เช่น tomorrow at 9am">
+            <button class="btn primary">เพิ่ม</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- Calendar -->
+    <section class="view" id="view-calendar" data-title="Calendar" data-sub="APPLE CALENDAR">
+      <div class="cols">
+        <div class="card glass">
+          <h3>นัดหมาย</h3>
+          <div class="btnRow"><button class="btn" data-act="calendar_today">วันนี้</button><button class="btn" data-act="calendar_tomorrow">พรุ่งนี้</button></div>
+          <div class="result" id="calendarOut">กด “วันนี้” เพื่ออ่านจากแอป Calendar (ครั้งแรก macOS อาจขอสิทธิ์)</div>
+        </div>
+        <div class="card glass">
+          <h3>เพิ่มนัด</h3>
+          <form class="stackForm" id="eventForm" autocomplete="off">
+            <input name="title" placeholder="ชื่อนัด เช่น ประชุมทีม" required>
+            <input name="start" placeholder="เริ่ม เช่น tomorrow at 3pm" required>
+            <input name="duration_minutes" type="number" min="5" step="5" value="60" aria-label="Duration minutes">
+            <button class="btn primary">เพิ่มลงปฏิทิน</button>
+          </form>
+          <p class="note">JARVIS จะถามยืนยันก่อนสร้างตามระบบเดิม</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Monitor -->
+    <section class="view" id="view-monitor" data-title="System Monitor" data-sub="MACBOOK · LOCAL AI">
+      <div class="gauges">
+        <div class="card glass gauge"><h3>CPU</h3><div class="big mono" id="monCpu">—</div><canvas class="spark" id="sparkCpu"></canvas></div>
+        <div class="card glass gauge"><h3>Memory</h3><div class="big mono" id="monMem">—</div><div class="sub mono" id="monMemSub"></div><canvas class="spark" id="sparkMem"></canvas></div>
+        <div class="card glass gauge"><h3>Battery</h3><div class="big mono" id="monBat">—</div><div class="sub" id="monBatSub"></div></div>
+        <div class="card glass gauge"><h3>AI Core</h3><div class="big mono" id="monFps">—</div><div class="sub mono" id="monFpsSub"></div></div>
+      </div>
+      <div class="cols">
+        <div class="card glass"><h3>Local AI services</h3><dl class="kv" id="monAi"></dl></div>
+        <div class="card glass"><h3>Audio &amp; brain</h3><dl class="kv" id="monBrain"></dl></div>
+      </div>
+    </section>
+
+    <!-- History -->
+    <section class="view" id="view-history" data-title="Activity History" data-sub="EPISODES · TOOLS · CONVERSATION">
+      <div class="cols wide-left">
+        <div class="card glass scroll"><h3>สิ่งที่ JARVIS ทำล่าสุด</h3><ol class="episodes" id="episodes"></ol></div>
+        <div class="card glass scroll"><h3>สถิติเครื่องมือ</h3><table class="table" id="toolStats"></table></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="view" id="view-settings" data-title="Settings" data-sub="PERSONALIZATION · SYSTEM">
+      <div class="settings">
+        <div class="card glass">
+          <h3>ภาษาและเสียง</h3>
+          <div class="row"><span>ภาษา JARVIS</span><select data-cfg="language"><option value="th">ไทย</option><option value="en">English</option></select></div>
+          <div class="row"><span>เสียงพูด</span><div class="ctl"><select id="setVoice"></select><button class="btn ghost" id="previewVoice">ลองฟัง</button></div></div>
+          <div class="row"><span>ความเร็วการพูด</span><div class="ctl"><input type="range" data-cfg="voice.speed" min="0.6" max="1.6" step="0.01"><output class="mono" data-out="voice.speed"></output></div></div>
+          <div class="row"><span>ภาษาที่ฟัง</span><select data-cfg="stt.language"><option value="auto">ไทย + อังกฤษ (อัตโนมัติ)</option><option value="th">เน้นไทย</option><option value="en">English</option></select></div>
+        </div>
+        <div class="card glass">
+          <h3>การฟัง</h3>
+          <div class="row"><span>Wake word “Hey Jarvis”</span><input type="checkbox" class="switch" data-cfg="listening.wake_word_enabled"></div>
+          <div class="row"><span>ความไวของ wake word</span><div class="ctl"><input type="range" data-cfg="listening.wake_threshold" min="0.15" max="0.9" step="0.05"><output class="mono" data-out="listening.wake_threshold"></output></div></div>
+          <div class="row"><span>ไมโครโฟน</span><div class="ctl"><select id="setMic"></select></div></div>
+          <p class="note" id="micNote"></p>
+        </div>
+        <div class="card glass">
+          <h3>AI Model</h3>
+          <div class="row"><span>โมเดลใน Ollama</span><select id="setModel"></select></div>
+          <p class="note" id="setModelNote"></p>
+        </div>
+        <div class="card glass">
+          <h3>หน้าตา</h3>
+          <div class="row"><span>Animation</span><select data-cfg="ui.animation"><option value="high">High (60 fps)</option><option value="balanced">Balanced (30 fps)</option><option value="minimal">Minimal</option></select></div>
+          <div class="row"><span>สีหลัก</span><div class="swatches" id="accentSwatches"></div></div>
+          <p class="note">macOS “Reduce motion” จะหยุดการหมุนทั้งหมดอัตโนมัติ</p>
+        </div>
+        <div class="card glass">
+          <h3>ตำแหน่ง</h3>
+          <div class="row"><span>อยู่ที่ (ใช้กับพยากรณ์อากาศ)</span>
+            <div class="seg" role="radiogroup">
+              <label><input type="radio" name="ccPlace" value="Hong Kong" data-cfg="location.city"><span>ฮ่องกง</span></label>
+              <label><input type="radio" name="ccPlace" value="Bangkok" data-cfg="location.city"><span>กรุงเทพฯ</span></label>
+            </div>
+          </div>
+        </div>
+        <div class="card glass">
+          <h3>ระบบ</h3>
+          <div class="row native-only"><span>เปิดเมื่อ Login</span><input type="checkbox" class="switch" id="setLogin"></div>
+          <dl class="kv" id="setBackend"></dl>
+          <div class="btnRow native-only">
+            <button class="btn" id="restartBrain">Restart AI Service</button>
+            <button class="btn ghost" id="openLogs">Open Logs</button>
+            <button class="btn ghost" id="openPerms">Privacy &amp; Permissions</button>
+          </div>
+          <p class="note">เสียง การถอดเสียง และโมเดลแชตทำงานในเครื่อง · YouTube Music, พยากรณ์อากาศ และค้นเว็บใช้อินเทอร์เน็ตตามปกติ</p>
+          <p class="note browser-only">ปุ่ม Restart / Logs / Permissions / Login ใช้ได้ในแอป Jarvis</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================================================ live panel -->
+  <aside class="live glass" id="live">
+    <div class="clock">
+      <div class="time mono" id="clockTime">--:--</div>
+      <div class="date" id="clockDate"></div>
+    </div>
+
+    <div class="tile" id="weatherTile">
+      <div class="tileHead"><span>WEATHER</span><b id="wxCity">—</b></div>
+      <div class="wxMain"><svg class="wxIcon" id="wxIcon" viewBox="0 0 48 48"></svg><div class="wxTemp mono" id="wxTemp">—</div></div>
+      <div class="wxSky" id="wxSky">ไม่พร้อมใช้งาน</div>
+      <div class="wxMeta mono" id="wxMeta"></div>
+    </div>
+
+    <div class="tile">
+      <div class="tileHead"><span>SYSTEM</span><b id="sysOk">—</b></div>
+      <div class="metric"><span>CPU</span><div class="bar"><i id="cpuBar"></i></div><b class="mono" id="cpuVal">—</b></div>
+      <div class="metric"><span>RAM</span><div class="bar"><i id="memBar"></i></div><b class="mono" id="memVal">—</b></div>
+      <div class="metric"><span>BATT</span><div class="bar"><i id="batBar"></i></div><b class="mono" id="batVal">—</b></div>
+      <div class="sub" id="batState"></div>
+    </div>
+
+    <div class="tile">
+      <div class="tileHead"><span>AI SERVICE</span><b id="aiOk">—</b></div>
+      <dl class="kv tight" id="aiKv"></dl>
+    </div>
+
+    <div class="tile nowPlaying" id="nowTile">
+      <div class="tileHead"><span>NOW PLAYING</span><b id="npState">—</b></div>
+      <div class="np">
+        <div class="npArt" id="npArt"></div>
+        <div class="npText"><div class="npTitle" id="npTitle">ไม่พร้อมใช้งาน</div><div class="npArtist" id="npArtist"></div></div>
+      </div>
+      <div class="npCtl">
+        <button data-music="previous" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5 9 12l10 7z"/></svg></button>
+        <button data-music="toggle" id="npToggle" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button data-music="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l10 7-10 7z"/></svg></button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="modalBack" id="confirmBack" hidden>
+  <div class="modal glass" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="eyebrow warn">ต้องยืนยัน</div>
+    <h2 id="confirmTitle">—</h2>
+    <p id="confirmDetail"></p>
+    <div class="btnRow end">
+      <button class="btn ghost" id="confirmNo">ยกเลิก</button>
+      <button class="btn primary warn" id="confirmYes">อนุญาต</button>
+    </div>
+  </div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script type="module" src="command.js"></script>
+</body>
+</html>

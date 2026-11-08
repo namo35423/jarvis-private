@@ -93,6 +93,7 @@ swiftc \
     "$ROOT/Sources/BrainClient.swift" \
     "$ROOT/Sources/BrainSupervisor.swift" \
     "$ROOT/Sources/MenuPanel.swift" \
+    "$ROOT/Sources/CommandCenter.swift" \
     "$ROOT/Sources/Permissions.swift" \
     "$ROOT/Sources/App.swift"
 

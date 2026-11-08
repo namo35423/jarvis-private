@@ -6,9 +6,11 @@ For people (and coding agents like Claude Code) working on Jarvis. Read
 ## Shape
 
 ```
-app/    Swift shell: menu-bar-only (LSUIElement), glass dropdown panel (MenuPanel.swift), ⌘\ hotkey, login item, supervises the brain
+app/    Swift shell: menu-bar app (LSUIElement), glass dropdown panel (MenuPanel.swift), full-size
+        Command Center window (CommandCenter.swift), ⌘\ hotkey, login item, supervises the brain
 brain/  Python 3.12 backend - the actual assistant
-ui/     what the window shows: raw WebGL2 orb + vanilla JS, no build step
+ui/     what the windows show, no build step: index.html/app.js (panel, WebGL2 orb) and
+        command.html/command.js/core.js (Command Center, Canvas 2D core)
 bin/    the `jarvis` CLI (also how you drive it from a session)
 ```
 
@@ -43,7 +45,8 @@ launched (LaunchServices silently no-ops an `open` on a just-replaced bundle).
 | `learning.py` | lessons, cached skills, tool stats |
 | `jobs.py` | Claude Code hand-offs (stream-json parsing, progress, cancel) |
 | `tools/` | everything the model can actually do; `__init__.py` is the contract |
-| `server.py` | aiohttp: WebSocket to the UI, HTTP API for the hotkey and CLI |
+| `server.py` | aiohttp: WebSocket to the UI, HTTP API for the hotkey, CLI and Command Center |
+| `live.py` | CPU / memory / battery / Ollama readings for the Command Center (no extra deps) |
 
 ## Things that will bite you
 
@@ -100,3 +103,20 @@ cache instead of replacing it.
 brain/verify.sh        # the brain imports and every tool registers
 app/build.sh           # the menu bar app compiles
 ```
+
+## Command Center (the full-size window)
+
+Opened from Spotlight, Finder, a Dock click, ⌘0, the menu (right-click the icon) or the
+panel's "center" button. The Dock icon exists only while it is open; closing it frees
+the web view entirely and Jarvis is a menu-bar app again. At login it stays hidden.
+
+- Everything on screen comes from brain events or `/api/live`, `/api/music`,
+  `/api/weather`, `/api/history`, `/api/action` (fixed button -> tool map; the tool's
+  own confirmation still applies). Show "ไม่พร้อมใช้งาน" rather than invent a value.
+- Fast-path and button tool calls go through `Assistant._exec`, which broadcasts the
+  same `tool` events as a model call and sets the `working` (EXECUTING) state.
+- The core caps its frame rate per state (idle 20 fps, active 60) and stops when the
+  window cannot be seen. `curl localhost:8765/api/uistats` returns the measured fps of
+  every open window, on demand.
+- Open `http://127.0.0.1:8765/command.html#chat` in a browser to work on it without
+  rebuilding; host-only settings (login item, restart, logs) need the app.

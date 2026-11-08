@@ -77,6 +77,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "listening": {
         "enabled": True,
+        "wake_word_enabled": True,  # off = push-to-talk only
         "wake_word": "hey_jarvis",
         "wake_threshold": 0.5,
         "vad_threshold": 0.5,
@@ -112,7 +113,9 @@ DEFAULTS: dict[str, Any] = {
         "units": "",  # "" = Celsius for Thai, Fahrenheit for English; set "metric"/"imperial" to force
         "timezone": "",
     },
-    "ui": {"mini_orb": True, "show_transcript": True},
+    "ui": {"mini_orb": True, "show_transcript": True,
+           # Command Center look: animation "high" | "balanced" | "minimal"; accent colour name
+           "animation": "high", "accent": "cyan"},
     "speech": {"max_spoken_chars": 1200},
 }
 

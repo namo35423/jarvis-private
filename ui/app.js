@@ -822,3 +822,10 @@ connect();
 setInterval(() => { if (state.connected) send({ type: "ping" }); }, 25000);
 
 window.addEventListener("pagehide", () => { if (sock) sock.close(); });
+
+// Inside the app's menu-bar panel: a way into the full Command Center window.
+const ccBtn = document.getElementById("ccBtn");
+if (ccBtn && window.JARVIS_NATIVE && window.webkit?.messageHandlers?.jarvisHost) {
+  ccBtn.hidden = false;
+  ccBtn.addEventListener("click", () => window.webkit.messageHandlers.jarvisHost.postMessage({ cmd: "openCommandCenter" }));
+}

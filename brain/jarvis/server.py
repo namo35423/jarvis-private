@@ -90,6 +90,18 @@ class Server:
         a.router.add_get("/api/models", self.api_models)
         a.router.add_get("/api/config", self.api_config)
         a.router.add_post("/api/config", self.api_set_config)
+        # Command Center: live readings and direct controls (additive; nothing above changed).
+        a.router.add_get("/api/live", self.api_live)
+        a.router.add_get("/api/weather", self.api_weather)
+        a.router.add_get("/api/music", self.api_music)
+        a.router.add_post("/api/music", self.api_music_action)
+        a.router.add_get("/api/volume", self.api_volume)
+        a.router.add_post("/api/volume", self.api_set_volume)
+        a.router.add_post("/api/action", self.api_action)
+        a.router.add_get("/api/history", self.api_history)
+        a.router.add_get("/api/devices", self.api_devices)
+        a.router.add_get("/api/timers", self.api_timers)
+        a.router.add_get("/api/uistats", self.api_uistats)
         a.router.add_get("/", self.index)
         a.router.add_get("/{filename:.+}", self.static_file)
 
@@ -169,6 +181,9 @@ class Server:
             asyncio.create_task(a.jobs.cancel(data.get("id", "")))
         elif kind == "ping":
             client.send_event({"type": "pong"})
+        elif kind == "ui_stats":
+            for waiter in list(getattr(self, "_stats_waiters", [])):
+                waiter.append(data)
 
     def _apply_config(self, path: str, value) -> None:
         """Some settings need a live component update, not just a stored value."""
@@ -276,10 +291,183 @@ class Server:
             self.assistant._ollama_ready = True
         self.cfg.set(path, value)
         self._apply_config(path, value)
+        # Every open window follows a change, whichever client made it.
+        self.assistant.broadcast({"type": "config", "config": self.cfg.as_dict()})
         if path == "llm.model":
-            self.assistant.broadcast({"type": "config", "config": self.cfg.as_dict()})
             self.assistant.broadcast(self.assistant.status())
         return web.json_response({"ok": True, "config": self.cfg.as_dict()})
+
+    # -------------------------------------------------------- command center
+    async def api_live(self, request: web.Request) -> web.Response:
+        from jarvis import live
+
+        data = await live.snapshot(self.cfg)
+        data["ready"] = self.assistant._ready
+        data["mic"] = self.assistant._mic_status
+        return web.json_response(data)
+
+    async def api_weather(self, request: web.Request) -> web.Response:
+        """Cached for 15 minutes per location: the panel must not hammer the weather service."""
+        import time
+
+        from jarvis.tools.web import weather_card
+        from jarvis.sysutil import ToolError
+
+        key = (self.cfg.get("location.city"), self.cfg.get("language"))
+        cached = getattr(self, "_weather", None)
+        if cached and cached[0] == key and time.monotonic() - cached[1] < 900 and not request.query.get("refresh"):
+            return web.json_response(cached[2])
+        try:
+            data = {"ok": True, **await weather_card(self.cfg)}
+        except (ToolError, Exception) as exc:  # noqa: BLE001 - the panel shows the reason
+            return web.json_response({"ok": False, "error": str(exc)[:200]})
+        self._weather = (key, time.monotonic(), data)
+        return web.json_response(data)
+
+    async def api_music(self, request: web.Request) -> web.Response:
+        import time
+
+        from jarvis.tools.youtube_music import player_snapshot
+
+        cached = getattr(self, "_music", None)
+        if cached and time.monotonic() - cached[0] < 1.5:
+            return web.json_response(cached[1])
+        data = await player_snapshot()
+        self._music = (time.monotonic(), data)
+        return web.json_response(data)
+
+    async def api_music_action(self, request: web.Request) -> web.Response:
+        """Transport buttons. The same verified youtube_music tool the voice commands use."""
+        from jarvis.tools.youtube_music import player_snapshot
+
+        data = await _json(request)
+        action = str(data.get("action", ""))
+        if action == "toggle":
+            now = await player_snapshot()
+            action = "pause" if now.get("available") and not now.get("paused") else "play"
+        if action not in ("play", "pause", "next", "previous", "open", "liked"):
+            return web.json_response({"error": "unknown action"}, status=400)
+        args = {"action": action}
+        if data.get("query"):
+            import re
+
+            query = str(data["query"]).strip()[:200]
+            by = re.match(r"^(.+?)\s+by\s+(.+)$", query, re.I)  # "Shape of You by Ed Sheeran"
+            if by and "ของ" not in query:
+                args["query"], args["artist"] = by[1].strip(), by[2].strip()
+            else:
+                args["query"] = query
+        result = await self.assistant.run_ui_tool("youtube_music", args)
+        self._music = None
+        return web.json_response({"result": result, "ok": not result.startswith(("Error:", "ทำรายการไม่สำเร็จ")),
+                                  "state": await player_snapshot()})
+
+    async def api_volume(self, request: web.Request) -> web.Response:
+        from jarvis.sysutil import ToolError
+        from jarvis.tools.system import _volume
+
+        try:
+            level, muted = await _volume()
+        except ToolError as exc:
+            return web.json_response({"ok": False, "error": str(exc)})
+        return web.json_response({"ok": True, "level": level, "muted": muted})
+
+    async def api_set_volume(self, request: web.Request) -> web.Response:
+        from jarvis.sysutil import ToolError
+        from jarvis.tools.system import _set_volume
+
+        data = await _json(request)
+        try:
+            level = await _set_volume(int(data.get("level", 0)))
+        except (ToolError, ValueError, TypeError) as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "level": level})
+
+    # Command Center buttons map to fixed tool calls; the page never names a tool itself.
+    UI_ACTIONS = {
+        "open_ytm": [("youtube_music", {"action": "open"})],
+        "open_chrome": [("open_app", {"name": "Google Chrome"})],
+        "open_vscode": [("open_app", {"name": "Visual Studio Code"})],
+        "study_mode": [("set_timer", {"duration": "25 minutes", "label": "โหมดอ่านหนังสือ"}),
+                       ("youtube_music", {"action": "play", "query": "เพลงอ่านหนังสือ"})],
+        "reminders_today": [("reminders", {"action": "list_today"})],
+        "reminders_all": [("reminders", {"action": "list_all"})],
+        "calendar_today": [("calendar", {"action": "list", "day": "today"})],
+        "calendar_tomorrow": [("calendar", {"action": "list", "day": "tomorrow"})],
+        "timers_list": [("timers", {"action": "list"})],
+        "timers_cancel_all": [("timers", {"action": "cancel_all"})],
+    }
+    # Forms that create something: the tool's own confirmation still applies.
+    UI_FORMS = {
+        "reminder_create": ("reminders", {"action": "create"}, ("text", "when")),
+        "event_create": ("calendar", {"action": "create"}, ("title", "start", "duration_minutes")),
+        "timer_create": ("set_timer", {}, ("duration", "label")),
+    }
+
+    async def api_action(self, request: web.Request) -> web.Response:
+        data = await _json(request)
+        name = str(data.get("id", ""))
+        steps = self.UI_ACTIONS.get(name)
+        if steps is None and name in self.UI_FORMS:
+            tool, base, fields = self.UI_FORMS[name]
+            args = dict(base)
+            for f in fields:
+                if data.get(f) not in (None, ""):
+                    args[f] = data[f] if f == "duration_minutes" else str(data[f])[:300]
+            steps = [(tool, args)]
+        if steps is None:
+            return web.json_response({"error": "unknown action"}, status=400)
+        results = []
+        for tool, args in steps:
+            result = await self.assistant.run_ui_tool(tool, dict(args))
+            results.append(result)
+            if result.startswith(("Error:", "ทำรายการไม่สำเร็จ", "ยกเลิก", "Cancelled")):
+                break
+        ok = not results[-1].startswith(("Error:", "ทำรายการไม่สำเร็จ", "ยกเลิก", "Cancelled"))
+        return web.json_response({"ok": ok, "results": results, "text": " ".join(results)})
+
+    async def api_history(self, request: web.Request) -> web.Response:
+        try:
+            limit = max(1, min(500, int(request.query.get("limit", 120))))
+        except ValueError:
+            limit = 120
+        a = self.assistant
+        return web.json_response({
+            "turns": [t for t in a.memory.recent_turns(limit) if t["role"] in ("user", "assistant", "reset")],
+            **a.learning.recent_episodes(min(limit, 100)),
+        })
+
+    async def api_devices(self, request: web.Request) -> web.Response:
+        def query():
+            import sounddevice as sd
+
+            default_in = sd.default.device[0]
+            return [{"index": i, "name": d["name"], "channels": d["max_input_channels"], "default": i == default_in}
+                    for i, d in enumerate(sd.query_devices()) if d["max_input_channels"] > 0]
+
+        try:
+            inputs = await asyncio.get_running_loop().run_in_executor(None, query)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"inputs": [], "error": str(exc)})
+        return web.json_response({"inputs": inputs, "selected": self.cfg.get("listening.input_device"),
+                                  "active": self.assistant.audio_in.device})
+
+    async def api_uistats(self, request: web.Request) -> web.Response:
+        """Ask every open Command Center for its measured frame rate (on demand only)."""
+        replies: list = []
+        self._stats_waiters = getattr(self, "_stats_waiters", [])
+        self._stats_waiters.append(replies)
+        try:
+            self.assistant.broadcast({"type": "stats_request"})
+            await asyncio.sleep(1.2)
+        finally:
+            self._stats_waiters.remove(replies)
+        return web.json_response({"windows": replies})
+
+    async def api_timers(self, request: web.Request) -> web.Response:
+        items = self.assistant.scheduler.pending()
+        return web.json_response({"items": [
+            {"id": i.id, "kind": i.kind, "text": i.text, "label": i.label, "fire_at": i.fire_at} for i in items]})
 
     # ---------------------------------------------------------------- static
     async def index(self, request: web.Request) -> web.StreamResponse:
@@ -295,3 +483,11 @@ class Server:
         if not path.is_file():
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
+async def _json(request: web.Request) -> dict:
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}

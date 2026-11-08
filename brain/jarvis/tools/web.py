@@ -596,6 +596,36 @@ def _weather_th(data: dict, when: str, city: str, imperial: bool) -> str:
     return out + "ครับ"
 
 
+async def weather_card(cfg) -> dict:
+    """Current conditions for the Command Center, at the place the location switch names."""
+    from types import SimpleNamespace
+
+    units = (cfg.get("location.units") or "").lower()
+    imperial = units.startswith("i") if units else cfg.get("language") != "th"
+    async with httpx.AsyncClient(headers={"User-Agent": UA}, timeout=10.0, follow_redirects=True) as client:
+        place = await _resolve_place(SimpleNamespace(cfg=cfg), client, "")
+        data = await _get_json(client, "https://api.open-meteo.com/v1/forecast", {
+            "latitude": place["lat"], "longitude": place["lon"],
+            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m,is_day",
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "temperature_unit": "fahrenheit" if imperial else "celsius",
+            "wind_speed_unit": "mph" if imperial else "kmh",
+            "timezone": place.get("timezone") or "auto", "forecast_days": 1,
+        })
+    cur, daily = data.get("current") or {}, data.get("daily") or {}
+    code = int(cur.get("weather_code") or 0)
+    first = lambda key: (daily.get(key) or [None])[0]  # noqa: E731
+    return {
+        "city": place["city"].split(",")[0].strip(),
+        "temp": round(cur.get("temperature_2m", 0)), "feels": round(cur.get("apparent_temperature", 0)),
+        "code": code, "sky": _sky_th(code) if cfg.get("language") == "th" else _sky(code),
+        "hi": round(first("temperature_2m_max") or 0), "lo": round(first("temperature_2m_min") or 0),
+        "rain": first("precipitation_probability_max"), "humidity": cur.get("relative_humidity_2m"),
+        "wind": round(cur.get("wind_speed_10m") or 0), "day": bool(cur.get("is_day", 1)),
+        "unit": "F" if imperial else "C", "observed": cur.get("time"),
+    }
+
+
 @tool(
     name="get_weather",
     description=(
